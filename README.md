@@ -1,7 +1,5 @@
 # Audplexus
 
-![Audplexus Logo](logo.svg)
-
 A self-hosted web app that syncs your Audible library, downloads and processes audiobooks, and organizes output for Plex audiobook libraries.
 
 ## What It Does
