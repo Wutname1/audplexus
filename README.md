@@ -1,25 +1,32 @@
 # Audplexus
 
-A self-hosted web app that syncs your Audible library, downloads and processes audiobooks, and organizes output for Plex **or Emby** audiobook libraries.
+[![Tests](https://github.com/mstrhakr/audplexus/actions/workflows/tests.yml/badge.svg?branch=master)](https://github.com/mstrhakr/audplexus/actions/workflows/tests.yml)
+[![Docker Build and Publish](https://github.com/mstrhakr/audplexus/actions/workflows/docker-publish.yml/badge.svg?branch=master)](https://github.com/mstrhakr/audplexus/actions/workflows/docker-publish.yml)
+[![Latest Release](https://img.shields.io/github/v/release/mstrhakr/audplexus?display_name=tag)](https://github.com/mstrhakr/audplexus/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/mstrhakr/audplexus)](https://github.com/mstrhakr/audplexus/blob/master/go.mod)
+
+A self-hosted web app that syncs your Audible library, downloads and processes audiobooks, and organizes output for supported media server libraries.
+
+Built on [go-audible](https://github.com/mstrhakr/go-audible), the Audible auth and API client used for library sync, download metadata, and activation handling.
 
 ## What It Does
 
 - Connects to Audible and syncs your library metadata.
-- Downloads books and processes them into Plex/Emby-friendly output.
-- Adds metadata and optional companion files (cover, chapters, Plex match hints).
+- Downloads books and processes them into media-server-friendly output.
+- Adds metadata and optional companion files (cover, chapters, match hints).
 - Triggers media-server library scans and creates series collections automatically.
 - Supports queue controls, retries, diagnostics, and scheduled sync.
 
-## Media Servers
+## Media Server Integrations
 
-Audplexus drives the media server through a backend abstraction. Pick one with the `MEDIA_SERVER` env var (or via Settings &rarr; Media Server in the UI):
+Audplexus drives various media server software through a backend abstraction. Pick one with the `MEDIA_SERVER` env var (or via Settings &rarr; Media Server in the UI):
 
 | Backend | `MEDIA_SERVER` | Status |
 | --- | --- | --- |
 | Plex | `plex` (default) | Full support: plex.tv OAuth login, section scans, `.plexmatch` hints, collection management |
 | Emby | `emby` | Full support: API-key auth, library refresh, BoxSet collection management, automatic library-path detection |
 
-Switching backends requires a container restart. The DB keeps both backends&apos; settings, so flipping back is non-destructive.
+Switching backends requires a container restart. The DB keeps backend settings, so flipping back is non-destructive.
 
 ### Emby Setup
 
@@ -64,7 +71,7 @@ docker compose up -d
 
 `http://localhost:8080`
 
-1. In Settings, connect Audible and (optionally) Plex.
+1. In Settings, connect Audible and (optionally) your media server.
 
 ### Docker Run
 
@@ -98,20 +105,20 @@ Key environment variables:
 | `DATABASE_TYPE` | `sqlite` | Database backend (`sqlite` or `postgres`) |
 | `DATABASE_PATH` | `/config/audible.db` | SQLite database path |
 | `DATABASE_DSN` | | PostgreSQL connection string |
-| `AUDIOBOOKS_PATH` | `/audiobooks` | Output directory (Plex library root) |
+| `AUDIOBOOKS_PATH` | `/audiobooks` | Output directory (media-server audiobook library root) |
 | `DOWNLOADS_PATH` | `/downloads` | Temporary download directory |
 | `CONFIG_PATH` | `/config` | Config/auth storage directory |
 | `OUTPUT_FORMAT` | `m4b` | Output format (`m4b` or `mp3`) |
 | `DOWNLOAD_CONCURRENCY` | `0` | Concurrent downloads (0 = auto-detect based on CPU) |
 | `DECRYPT_CONCURRENCY` | `0` | Concurrent decrypt workers (0 = auto-detect) |
 | `PROCESS_CONCURRENCY` | `0` | Concurrent process workers (0 = auto-detect) |
-| `MEDIA_SERVER` | `plex` | Active backend: `plex` or `emby` |
-| `PLEX_URL` | | Plex server URL for library scan triggers |
-| `PLEX_TOKEN` | | Plex authentication token |
-| `EMBY_URL` | | Emby server URL (e.g. `http://emby:8096`) |
-| `EMBY_API_KEY` | | Emby API key from `Settings &rarr; Advanced &rarr; API Keys` |
-| `EMBY_LIBRARY_ID` | | Emby `ItemId` of the audiobook library (`CollectionType=audiobooks`) |
-| `EMBY_LIBRARY_PATH` | | Optional override of the path Emby uses to read the library; auto-detected via `VirtualFolders` on first scan |
+| `MEDIA_SERVER` | `plex` | Active backend for your media server integration |
+| `PLEX_URL` | | Server URL for library scan triggers |
+| `PLEX_TOKEN` | | Authentication token |
+| `EMBY_URL` | | Server URL (e.g. `http://emby:8096`) |
+| `EMBY_API_KEY` | | API key from `Settings &rarr; Advanced &rarr; API Keys` |
+| `EMBY_LIBRARY_ID` | | `ItemId` of the audiobook library (`CollectionType=audiobooks`) |
+| `EMBY_LIBRARY_PATH` | | Optional override of the path used to read the library; auto-detected via `VirtualFolders` on first scan |
 | `SYNC_SCHEDULE` | `0 */6 * * *` | Cron schedule for library sync |
 | `SYNC_MODE` | `full` | Scheduled sync mode (`quick` or `full`) |
 | `PUID` | | Unraid-style runtime UID override (used when container starts as root) |
