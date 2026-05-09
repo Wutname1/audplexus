@@ -258,6 +258,7 @@ func (s *Server) setupRoutes() {
 	s.router.GET("/diagnostics", s.handleDiagnostics)
 
 	// Auth
+	s.router.POST("/auth/marketplace", s.handleAudibleMarketplaceSelect)
 	s.router.POST("/auth/start", s.handleAuthStart)
 	s.router.POST("/auth/callback", s.handleAuthCallback)
 	s.router.POST("/auth/plex/start", s.handlePlexStart)
@@ -1588,7 +1589,9 @@ func (s *Server) authBaseData(ctx context.Context) gin.H {
 	mediaServerType := mediaserver.Resolve(ctx, s.db)
 	mediaServerLabelKey, mediaServerDisplay := mediaServerLabel(mediaServerType)
 	currentMarketplace := "us"
-	if creds := s.audible.GetCredentials(); creds != nil && creds.Marketplace != "" {
+	if storedMarketplace, _ := s.db.GetSetting(ctx, "audible_marketplace"); strings.TrimSpace(storedMarketplace) != "" {
+		currentMarketplace = strings.TrimSpace(storedMarketplace)
+	} else if creds := s.audible.GetCredentials(); creds != nil && creds.Marketplace != "" {
 		currentMarketplace = creds.Marketplace
 	}
 
@@ -1626,12 +1629,43 @@ func (s *Server) renderAuthPage(c *gin.Context, status int, extra gin.H) {
 	c.HTML(status, "settings.html", data)
 }
 
+// handleAudibleMarketplaceSelect updates the preferred Audible marketplace.
+func (s *Server) handleAudibleMarketplaceSelect(c *gin.Context) {
+	ctx := c.Request.Context()
+	mp := strings.ToLower(strings.TrimSpace(c.PostForm("marketplace")))
+	if mp == "" {
+		s.renderAuthPage(c, http.StatusBadRequest, gin.H{"Error": "Select an Audible region."})
+		return
+	}
+	market, ok := audible.GetMarketplace(mp)
+	if !ok {
+		s.renderAuthPage(c, http.StatusBadRequest, gin.H{"Error": "Unknown Audible region selected."})
+		return
+	}
+
+	s.audible.SetMarketplace(market)
+	if err := s.db.SetSetting(ctx, "audible_marketplace", mp); err != nil {
+		s.renderAuthPage(c, http.StatusInternalServerError, gin.H{"Error": "Failed to save Audible region: " + err.Error()})
+		return
+	}
+
+	s.renderAuthPage(c, http.StatusOK, gin.H{
+		"Success": "Audible region updated to " + strings.ToUpper(mp) + ".",
+	})
+}
+
 // handleAuthStart generates an OAuth URL and shows it to the user.
 func (s *Server) handleAuthStart(c *gin.Context) {
-	if mp := c.PostForm("marketplace"); mp != "" {
+	mp := strings.ToLower(strings.TrimSpace(c.PostForm("marketplace")))
+	if mp == "" {
+		mp, _ = s.db.GetSetting(c.Request.Context(), "audible_marketplace")
+		mp = strings.ToLower(strings.TrimSpace(mp))
+	}
+	if mp != "" {
 		if market, ok := audible.GetMarketplace(mp); ok {
 			s.audible.SetMarketplace(market)
-			webLog.Info().Str("marketplace", mp).Msg("marketplace set from auth form")
+			_ = s.db.SetSetting(c.Request.Context(), "audible_marketplace", mp)
+			webLog.Info().Str("marketplace", mp).Msg("marketplace set for auth flow")
 		} else {
 			webLog.Warn().Str("marketplace", mp).Msg("unknown marketplace code, using current")
 		}

@@ -22,6 +22,19 @@
             <section class="auth-panel">
                 <h3>Amazon / Audible</h3>
 
+                <form method="POST" action="/auth/marketplace" class="settings-form" style="margin-bottom: 1rem;">
+                    <div class="form-group" style="margin-bottom: 0.75rem;">
+                        <label for="marketplace">Audible Region / Marketplace</label>
+                        <select id="marketplace" name="marketplace" class="form-control">
+                            {{range .Marketplaces}}
+                            <option value="{{.CountryCode}}"{{if eq .CountryCode $.CurrentMarketplace}} selected{{end}}>{{.Name}} ({{.CountryCode}})</option>
+                            {{end}}
+                        </select>
+                        <small class="muted">This can be changed anytime. Use this if your Audible account region changed.</small>
+                    </div>
+                    <button type="submit" class="btn btn-secondary">Save Audible Region</button>
+                </form>
+
                 {{if .Authenticated}}
                 <div class="info-box" style="border-color: var(--success); margin-bottom: 1.5rem;">
                     <strong>&#10003; Authenticated</strong> &mdash; You are connected to Audible.
@@ -67,14 +80,7 @@
                     <p>You need to authenticate with your Amazon/Audible account to sync and download your library.</p>
                     <p>This flow generates a login URL. After signing in, paste the redirect URL back here to complete authentication.</p>
                     <form method="POST" action="/auth/start">
-                        <div class="form-group" style="margin-bottom: 0.75rem;">
-                            <label for="marketplace">Audible Region / Marketplace</label>
-                            <select id="marketplace" name="marketplace" class="form-control">
-                                {{range .Marketplaces}}
-                                <option value="{{.CountryCode}}"{{if eq .CountryCode $.CurrentMarketplace}} selected{{end}}>{{.Name}} ({{.CountryCode}})</option>
-                                {{end}}
-                            </select>
-                        </div>
+                        <input type="hidden" name="marketplace" value="{{.CurrentMarketplace}}">
                         <button type="submit" class="btn btn-primary">Generate Amazon Login Link</button>
                     </form>
                 </div>
