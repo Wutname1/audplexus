@@ -62,6 +62,7 @@ type Server struct {
 		count     int
 		fetchedAt time.Time
 	}
+}
 
 // NewServer creates a new web server with all handlers registered.
 func NewServer(
