@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"strings"
 	"sync"
 	"time"
@@ -13,6 +14,14 @@ import (
 	"github.com/mstrhakr/audplexus/internal/logging"
 	audible "github.com/mstrhakr/go-audible"
 )
+
+// cleanText decodes HTML entities and trims whitespace. Audible's API
+// occasionally returns titles, descriptions, and series names with literal
+// `&amp;` / `&apos;` / `&uacute;` entities that should be decoded once at
+// the source so the rest of the app sees clean Unicode.
+func cleanText(s string) string {
+	return strings.TrimSpace(html.UnescapeString(s))
+}
 
 var syncLog = logging.Component("sync")
 
@@ -39,11 +48,15 @@ const (
 )
 
 // DefaultFullPhases returns the standard set of sync phases in idle state.
+//
+// Phase identifiers retain their historical names (PhasePlexSync) for URL/JS
+// compatibility, but the user-visible labels are media-server-agnostic so the
+// dashboard reads naturally regardless of which backend is active.
 func DefaultFullPhases() []PhaseStatus {
 	return []PhaseStatus{
 		{Name: PhaseAudibleSync, Label: "Audible Library", Status: "idle"},
 		{Name: PhaseFileScan, Label: "File System Scan", Status: "idle"},
-		{Name: PhasePlexSync, Label: "Plex Sync", Status: "idle"},
+		{Name: PhasePlexSync, Label: "Library Scan", Status: "idle"},
 		{Name: PhaseCollectionSync, Label: "Collection Sync", Status: "idle"},
 	}
 }
@@ -341,7 +354,7 @@ func (s *SyncService) RunPhase(ctx context.Context, phase SyncPhase) error {
 
 	case PhasePlexSync:
 		if s.plexSyncFunc == nil {
-			phaseErr = fmt.Errorf("Plex not configured")
+			phaseErr = fmt.Errorf("media server not configured")
 		} else {
 			items, err := s.plexSyncFunc(ctx)
 			if err != nil {
@@ -358,7 +371,7 @@ func (s *SyncService) RunPhase(ctx context.Context, phase SyncPhase) error {
 
 	case PhaseCollectionSync:
 		if s.plexReconcileFunc == nil {
-			phaseErr = fmt.Errorf("Plex not configured")
+			phaseErr = fmt.Errorf("media server not configured")
 		} else {
 			completeStatus := database.BookStatusComplete
 			_, completeCount, _ := s.db.ListBooks(ctx, database.BookFilter{Status: &completeStatus, Limit: 1})
@@ -565,7 +578,7 @@ func (s *SyncService) buildPhases(mode SyncMode, prev []PhaseStatus) []PhaseStat
 		return []PhaseStatus{
 			defaultPhase(PhaseAudibleSync, "Audible Library"),
 			defaultPhase(PhaseFileScan, "File System Scan"),
-			defaultPhase(PhasePlexSync, "Plex Sync"),
+			defaultPhase(PhasePlexSync, "Library Scan"),
 			defaultPhase(PhaseCollectionSync, "Collection Sync"),
 		}
 	}
@@ -576,7 +589,7 @@ func (s *SyncService) buildPhases(mode SyncMode, prev []PhaseStatus) []PhaseStat
 		label string
 	}{
 		{name: PhaseFileScan, label: "File System Scan"},
-		{name: PhasePlexSync, label: "Plex Sync"},
+		{name: PhasePlexSync, label: "Library Scan"},
 		{name: PhaseCollectionSync, label: "Collection Sync"},
 	} {
 		if prevPhase, ok := findPrev(phase.name); ok {
@@ -1024,11 +1037,11 @@ func ucfirst(s string) string {
 func convertBook(b audible.Book) database.Book {
 	authors := make([]string, len(b.Authors))
 	for i, a := range b.Authors {
-		authors[i] = a.Name
+		authors[i] = cleanText(a.Name)
 	}
 	narrators := make([]string, len(b.Narrators))
 	for i, n := range b.Narrators {
-		narrators[i] = n.Name
+		narrators[i] = cleanText(n.Name)
 	}
 
 	var authorASIN string
@@ -1038,8 +1051,8 @@ func convertBook(b audible.Book) database.Book {
 
 	var series, seriesPos string
 	if len(b.Series) > 0 {
-		series = b.Series[0].Title
-		seriesPos = b.Series[0].Sequence
+		series = cleanText(b.Series[0].Title)
+		seriesPos = strings.TrimSpace(b.Series[0].Sequence)
 	}
 
 	coverURL := b.ProductImages.Image2400
@@ -1060,12 +1073,12 @@ func convertBook(b audible.Book) database.Book {
 
 	return database.Book{
 		ASIN:           b.BestID(),
-		Title:          b.Title,
+		Title:          cleanText(b.Title),
 		Author:         strings.Join(authors, ", "),
 		AuthorASIN:     authorASIN,
 		Narrator:       strings.Join(narrators, ", "),
-		Publisher:      b.Publisher,
-		Description:    b.PublisherSummary,
+		Publisher:      cleanText(b.Publisher),
+		Description:    cleanText(b.PublisherSummary),
 		Duration:       int64(b.RuntimeMinutes) * 60,
 		Series:         series,
 		SeriesPosition: seriesPos,

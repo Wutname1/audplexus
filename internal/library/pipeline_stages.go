@@ -3,6 +3,7 @@ package library
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"time"
@@ -10,6 +11,25 @@ import (
 	"github.com/mstrhakr/audplexus/internal/audnexus"
 	"github.com/mstrhakr/audplexus/internal/database"
 )
+
+// copyFileSimple copies src to dst, overwriting any existing file. Used for
+// best-effort sidecar writes (e.g. folder.jpg) where progress isn't needed.
+func copyFileSimple(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		return err
+	}
+	return out.Close()
+}
 
 // handleDownloadStage handles the download stage of the pipeline.
 func (dm *DownloadManager) handleDownloadStage(ctx context.Context, item *database.DownloadQueue) {
@@ -325,6 +345,18 @@ func (dm *DownloadManager) handleProcessStage(ctx context.Context, item *pipelin
 	}
 	onMoveProgress(totalBytes, totalBytes)
 
+	// Drop a folder-level `folder.jpg` next to the audiobook so media servers
+	// that prefer a sidecar cover (Emby looks for folder.jpg before falling
+	// back to embedded artwork; Plex also accepts it) don't have to extract
+	// from the m4b. Best-effort: failure here doesn't fail the pipeline.
+	tempCover := filepath.Join(dm.downloadDir, item.ASIN+".cover.jpg")
+	if _, statErr := os.Stat(tempCover); statErr == nil {
+		folderCover := filepath.Join(filepath.Dir(finalPath), "folder.jpg")
+		if err := copyFileSimple(tempCover, folderCover); err != nil {
+			asinLog.Debug().Err(err).Str("dest", folderCover).Msg("folder cover write skipped")
+		}
+	}
+
 	// Clean up intermediate files
 	dm.cleanupDownloadFiles(item.ASIN)
 
@@ -339,11 +371,11 @@ func (dm *DownloadManager) handleProcessStage(ctx context.Context, item *pipelin
 	}
 
 	asinLog.Info().Str("path", finalPath).Msg("pipeline complete")
-	dm.triggerPlexScanForBook(finalPath)
-
-	// Add to a Plex collection named after the series (if any).
-	if enriched != nil {
-		dm.addBookToSeriesCollection(enriched.Series(), enriched.Title())
+	if dm.mediaServer != nil {
+		dm.mediaServer.TriggerScanForBook(finalPath)
+		if enriched != nil {
+			dm.mediaServer.EnsureBookInSeriesCollection(enriched.Series(), enriched.Title())
+		}
 	}
 
 	dm.emit(DownloadEvent{
