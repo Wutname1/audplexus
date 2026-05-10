@@ -3,6 +3,7 @@ package web
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -117,6 +118,121 @@ func (s *Server) handleDestinationsNewForm(c *gin.Context) {
 	data["DestType"] = t
 	data["DestTypeLabel"] = destinationTypeLabel(database.LibraryDestinationType(t))
 	c.HTML(http.StatusOK, "destinations_form.html", data)
+}
+
+// handleDestinationTest performs a live health check against the
+// configured server using the form-submitted (or stored) credentials.
+// Returns an HTML fragment for HTMX swap into #test-result with
+// role="status" aria-live="polite" so SR users hear the outcome.
+//
+// Two routes hit this handler:
+//   POST /destinations/test         — form values, no row persisted
+//   POST /destinations/:id/test     — saved row, secrets carried over;
+//                                     on test outcome the row's
+//                                     last_health_check_* columns are
+//                                     updated so the dashboard's
+//                                     "Healthy/Failed" badge reflects
+//                                     the most recent test.
+func (s *Server) handleDestinationTest(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	d, err := s.destinationForTest(c)
+	if err != nil {
+		renderTestResult(c, false, "", err.Error())
+		return
+	}
+
+	backend, err := s.buildDestinationBackend(d)
+	if err != nil {
+		s.recordDestinationHealth(c.Request.Context(), c.Param("id"), false, err.Error())
+		renderTestResult(c, false, "", "Could not construct backend: "+err.Error())
+		return
+	}
+
+	count, err := backend.LibraryItemCount(ctx)
+	if err != nil {
+		s.recordDestinationHealth(c.Request.Context(), c.Param("id"), false, err.Error())
+		renderTestResult(c, false, "", "Connection or auth failed: "+err.Error())
+		return
+	}
+	s.recordDestinationHealth(c.Request.Context(), c.Param("id"), true, "")
+	renderTestResult(c, true, fmt.Sprintf("Library reports %d item(s).", count), "")
+}
+
+// recordDestinationHealth updates a destination row's
+// last_health_check_* columns. No-op when destID is empty (the
+// "test before save" path on /destinations/test has no row yet).
+//
+// Called from:
+//   - handleDestinationTest after a Test Connection click
+//   - DestinationManager.ReconcileAll (per-destination outcome)
+//   - DestinationManager.TriggerScanAll (per-destination outcome)
+func (s *Server) recordDestinationHealth(ctx context.Context, destID string, ok bool, errMsg string) {
+	if destID == "" {
+		return
+	}
+	row, err := s.db.GetLibraryDestination(ctx, destID)
+	if err != nil || row == nil {
+		return
+	}
+	now := time.Now().UTC()
+	row.LastHealthCheckAt = &now
+	row.LastHealthCheckOK = &ok
+	row.LastHealthCheckErr = errMsg
+	if err := s.db.UpdateLibraryDestination(ctx, row); err != nil {
+		webLog.Debug().Err(err).Str("destination_id", destID).Msg("recordDestinationHealth: update failed")
+	}
+}
+
+// destinationForTest builds a *LibraryDestination from form values for
+// the new-destination test path, OR loads the saved row for the existing-
+// destination test path. Sensitive empty fields on the saved-row path are
+// carried over so the user doesn't have to retype the API key just to test.
+func (s *Server) destinationForTest(c *gin.Context) (*database.LibraryDestination, error) {
+	id := c.Param("id")
+	if id == "" {
+		// New-destination test: build from form values directly.
+		return s.destinationFromForm(c, "")
+	}
+	existing, err := s.db.GetLibraryDestination(c.Request.Context(), id)
+	if err != nil || existing == nil {
+		return nil, fmt.Errorf("destination not found")
+	}
+	formed, err := s.destinationFromForm(c, string(existing.Type))
+	if err != nil {
+		// Form values absent or invalid — test the saved row as-is.
+		return existing, nil
+	}
+	if strings.TrimSpace(formed.PlexToken) == "" {
+		formed.PlexToken = existing.PlexToken
+	}
+	if strings.TrimSpace(formed.APIKey) == "" {
+		formed.APIKey = existing.APIKey
+	}
+	return formed, nil
+}
+
+func renderTestResult(c *gin.Context, ok bool, success, fail string) {
+	// Tiny inline HTML fragment. role="status" is set on the wrapper in
+	// the form template; this fragment provides the inner content. The
+	// banner color encodes status visually; the explicit "Connected" /
+	// "Failed" prefix encodes it for SR users.
+	c.Header("Content-Type", "text/html; charset=utf-8")
+	if ok {
+		c.String(http.StatusOK,
+			`<div class="info-box" style="border-color:var(--success);margin:.5rem 0">`+
+				`<strong>Connected.</strong> `+htmlEscape(success)+`</div>`)
+		return
+	}
+	c.String(http.StatusOK,
+		`<div class="info-box" style="border-color:var(--error);margin:.5rem 0" tabindex="-1" id="test-result-failure">`+
+			`<strong>Failed.</strong> `+htmlEscape(fail)+`</div>`)
+}
+
+func htmlEscape(s string) string {
+	r := strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;")
+	return r.Replace(s)
 }
 
 // handleDestinationsCreate persists a new destination after the form submit.

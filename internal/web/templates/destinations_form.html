@@ -47,14 +47,32 @@
                     <input id="plex_token" name="plex_token" type="password" autocomplete="off"
                            {{if not $isEdit}}required{{end}}
                            aria-describedby="plex_token_help">
-                    <small id="plex_token_help" class="muted">{{if $isEdit}}Leave blank to keep the current token. {{end}}Get one from <code>https://&lt;plex&gt;/web/index.html#!/settings/server</code> &rarr; Account.</small>
+                    <small id="plex_token_help" class="muted">{{if $isEdit}}Leave blank to keep the current token. {{end}}Long-lived authentication string for your Plex account.</small>
+                    <details style="margin-top:.4rem">
+                        <summary>How to find your Plex token</summary>
+                        <ol style="margin:.5rem 0 0 1.25rem;padding:0">
+                            <li>Sign in to Plex web UI at <code>http://&lt;your-plex&gt;:32400/web</code>.</li>
+                            <li>Play any audiobook (or open its detail page).</li>
+                            <li>Click the &hellip; menu &rarr; <strong>Get Info</strong> &rarr; <strong>View XML</strong>.</li>
+                            <li>The new tab's URL contains <code>?X-Plex-Token=&lt;token&gt;</code> &mdash; copy that value.</li>
+                            <li>Alternative: Plex web &rarr; Account picture &rarr; Account &rarr; Authorized Devices, or see <a href="https://support.plex.tv/articles/204059436-finding-an-authentication-token-x-plex-token/" target="_blank" rel="noopener noreferrer">Plex&apos;s official guide</a>.</li>
+                        </ol>
+                    </details>
                 </div>
                 <div class="form-group">
                     <label for="plex_section_id">Plex section ID</label>
                     <input id="plex_section_id" name="plex_section_id" type="text" required
                            value="{{if $isEdit}}{{.Dest.PlexSectionID}}{{end}}"
                            aria-describedby="plex_section_id_help">
-                    <small id="plex_section_id_help" class="muted">Numeric library/section ID. Find via <code>GET /library/sections?X-Plex-Token=&lt;token&gt;</code>.</small>
+                    <small id="plex_section_id_help" class="muted">Numeric ID of your audiobook library/section.</small>
+                    <details style="margin-top:.4rem">
+                        <summary>How to find your section ID</summary>
+                        <ol style="margin:.5rem 0 0 1.25rem;padding:0">
+                            <li>In Plex web, click your audiobook library in the sidebar.</li>
+                            <li>The URL bar shows <code>/source/&lt;sectionId&gt;</code> &mdash; that number is your section ID.</li>
+                            <li>API alternative: <code>curl 'http://&lt;plex&gt;:32400/library/sections?X-Plex-Token=&lt;token&gt;'</code> &mdash; pick the <code>&lt;Directory key="..."&gt;</code> with <code>type="artist"</code>.</li>
+                        </ol>
+                    </details>
                 </div>
                 {{else}}
                 <div class="form-group">
@@ -62,14 +80,63 @@
                     <input id="api_key" name="api_key" type="password" autocomplete="off"
                            {{if not $isEdit}}required{{end}}
                            aria-describedby="api_key_help">
-                    <small id="api_key_help" class="muted">{{if $isEdit}}Leave blank to keep the current API key. {{end}}{{if eq $dt "abs"}}Audiobookshelf API key from Settings &rarr; Users &rarr; API Keys (admin scope required for scans).{{else}}{{.DestTypeLabel}} server API key.{{end}}</small>
+                    <small id="api_key_help" class="muted">{{if $isEdit}}Leave blank to keep the current API key. {{end}}{{if eq $dt "abs"}}Admin-scope API key for the Audiobookshelf server.{{else}}{{.DestTypeLabel}} server API key.{{end}}</small>
+                    <details style="margin-top:.4rem">
+                        <summary>How to generate this API key</summary>
+                        {{if eq $dt "emby"}}
+                        <ol style="margin:.5rem 0 0 1.25rem;padding:0">
+                            <li>Open Emby's web UI as an administrator.</li>
+                            <li>Go to <strong>Settings</strong> (gear icon) &rarr; <strong>Server</strong> &rarr; <strong>Advanced</strong> &rarr; <strong>API Keys</strong>.</li>
+                            <li>Click <strong>+ New API Key</strong>. Give it a name like &quot;Audplexus&quot;.</li>
+                            <li>Copy the generated key. Emby may show it only once depending on version.</li>
+                        </ol>
+                        {{else if eq $dt "jellyfin"}}
+                        <ol style="margin:.5rem 0 0 1.25rem;padding:0">
+                            <li>Open Jellyfin's web UI as an administrator.</li>
+                            <li>Go to <strong>Dashboard</strong> &rarr; <strong>API Keys</strong> (under Advanced).</li>
+                            <li>Click <strong>+</strong>. Give it an app name like &quot;Audplexus&quot;.</li>
+                            <li>Copy the generated key. Jellyfin shows it once at creation.</li>
+                        </ol>
+                        {{else if eq $dt "abs"}}
+                        <ol style="margin:.5rem 0 0 1.25rem;padding:0">
+                            <li>Open Audiobookshelf as an administrator.</li>
+                            <li>Go to <strong>Settings</strong> (gear icon) &rarr; <strong>Users</strong>.</li>
+                            <li>Click your admin user.</li>
+                            <li>Scroll to <strong>API Keys</strong> &rarr; <strong>Generate API Key</strong>. Required scope: admin.</li>
+                            <li>The token is shown <em>once</em> at generation. Copy it immediately and paste here.</li>
+                        </ol>
+                        {{end}}
+                    </details>
                 </div>
                 <div class="form-group">
                     <label for="library_id">Library ID</label>
                     <input id="library_id" name="library_id" type="text" required
                            value="{{if $isEdit}}{{.Dest.LibraryID}}{{end}}"
                            aria-describedby="library_id_help">
-                    <small id="library_id_help" class="muted">{{if eq $dt "abs"}}UUID of the audiobook library on the ABS server.{{else}}Library ItemId of the audiobook library on the {{.DestTypeLabel}} server.{{end}}</small>
+                    <small id="library_id_help" class="muted">{{if eq $dt "abs"}}UUID of the audiobook library on the ABS server.{{else}}{{.DestTypeLabel}} ItemId of the audiobook library on the server.{{end}}</small>
+                    <details style="margin-top:.4rem">
+                        <summary>How to find your library ID</summary>
+                        {{if eq $dt "emby"}}
+                        <ol style="margin:.5rem 0 0 1.25rem;padding:0">
+                            <li>In a terminal, run: <code>curl 'http://&lt;emby&gt;:8096/emby/Library/MediaFolders?api_key=&lt;your_key&gt;' | jq</code></li>
+                            <li>Find the entry where <code>CollectionType</code> is <code>audiobooks</code>.</li>
+                            <li>Copy its <code>ItemId</code> field. That&apos;s your library ID.</li>
+                        </ol>
+                        {{else if eq $dt "jellyfin"}}
+                        <ol style="margin:.5rem 0 0 1.25rem;padding:0">
+                            <li>In a terminal, run: <code>curl -H 'X-Emby-Token: &lt;your_key&gt;' 'http://&lt;jellyfin&gt;:8096/Library/VirtualFolders' | jq</code></li>
+                            <li>Find the entry with <code>"CollectionType": "books"</code> and an audiobook path.</li>
+                            <li>Copy its <code>ItemId</code> field. That&apos;s your library ID.</li>
+                        </ol>
+                        {{else if eq $dt "abs"}}
+                        <ol style="margin:.5rem 0 0 1.25rem;padding:0">
+                            <li>In a terminal, run: <code>curl -H 'Authorization: Bearer &lt;your_key&gt;' 'http://&lt;abs&gt;:80/api/libraries' | jq '.libraries[] | {id,name,mediaType}'</code></li>
+                            <li>Find the entry where <code>mediaType</code> is <code>book</code> (your audiobook library).</li>
+                            <li>Copy its <code>id</code> field (a UUID like <code>00d44f08-df07-...</code>). That&apos;s your library ID.</li>
+                            <li>UI alternative: open Audiobookshelf web &rarr; click your audiobook library &rarr; the URL <code>/library/&lt;id&gt;</code> contains it.</li>
+                        </ol>
+                        {{end}}
+                    </details>
                 </div>
                 {{end}}
 
@@ -93,8 +160,26 @@
                     </div>
                 </details>
 
-                <div style="display:flex;gap:.75rem;margin-top:1rem">
+                {{/*
+                  Test result container (must exist before HTMX swap so the
+                  live region announcement fires reliably). role="status"
+                  + aria-live="polite" announces the outcome to SR users
+                  without interrupting them. aria-atomic="true" ensures
+                  the full result is read on update, not just diffs.
+                */}}
+                <div id="test-result" role="status" aria-live="polite" aria-atomic="true" aria-busy="false" style="margin-top:.75rem"></div>
+
+                <div style="display:flex;gap:.75rem;margin-top:1rem;flex-wrap:wrap">
                     <a href="/settings#library-destinations" class="btn btn-outline">Cancel</a>
+                    <button type="button" class="btn btn-secondary"
+                            hx-post="{{if $isEdit}}/destinations/{{.Dest.ID}}/test{{else}}/destinations/test{{end}}"
+                            hx-include="closest form"
+                            hx-target="#test-result"
+                            hx-swap="innerHTML"
+                            hx-on::before-request="document.getElementById('test-result').setAttribute('aria-busy', 'true'); document.getElementById('test-result').textContent = 'Testing connection…';"
+                            hx-on::after-request="document.getElementById('test-result').setAttribute('aria-busy', 'false');">
+                        Test Connection
+                    </button>
                     <button type="submit" class="btn btn-primary">{{if $isEdit}}Save Destination{{else}}Create Destination{{end}}</button>
                 </div>
             </form>

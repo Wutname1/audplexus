@@ -114,6 +114,13 @@ func NewServer(
 		if dm := dlMgr.Destinations(); dm != nil {
 			total, results := dm.TriggerScanAll(ctx)
 			if len(results) > 0 {
+				for _, r := range results {
+					errMsg := ""
+					if r.Err != nil {
+						errMsg = r.Err.Error()
+					}
+					s.recordDestinationHealth(ctx, r.Destination.ID, r.Err == nil, errMsg)
+				}
 				webLog.Info().Int("destinations", len(results)).Int("total_items", total).Msg("library scan: fan-out complete")
 				return total, nil
 			}
@@ -134,11 +141,14 @@ func NewServer(
 			if len(results) > 0 {
 				okN, failN := 0, 0
 				for _, r := range results {
+					errMsg := ""
 					if r.Err != nil {
+						errMsg = r.Err.Error()
 						failN++
 					} else {
 						okN++
 					}
+					s.recordDestinationHealth(ctx, r.Destination.ID, r.Err == nil, errMsg)
 				}
 				webLog.Info().Int("destinations", len(results)).Int("succeeded", okN).Int("failed", failN).Msg("reconcile: fan-out complete")
 				if okN == 0 && failN > 0 {
@@ -315,6 +325,10 @@ func (s *Server) setupRoutes() {
 	s.router.GET("/destinations/new", s.handleDestinationsNewPicker)
 	s.router.POST("/destinations/new", s.handleDestinationsNewForm)
 	s.router.POST("/destinations/create", s.handleDestinationsCreate)
+	// Test connection — runs a live LibraryItemCount probe with current
+	// form values. HTMX-targeted; renders a small HTML fragment.
+	s.router.POST("/destinations/test", s.handleDestinationTest)
+	s.router.POST("/destinations/:id/test", s.handleDestinationTest)
 	s.router.GET("/destinations/:id/edit", s.handleDestinationEditForm)
 	s.router.POST("/destinations/:id", s.handleDestinationUpdate)
 	s.router.POST("/destinations/:id/toggle", s.handleDestinationToggle)
