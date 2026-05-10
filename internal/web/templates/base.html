@@ -567,7 +567,14 @@
             var card = document.getElementById('pipe-' + asin);
             if (card) card.setAttribute('data-cancelling', '1');
             fetch('/api/downloads/cancel-active/' + encodeURIComponent(asin), { method: 'POST' })
-                .catch(function() { /* SSE will reflect the eventual failed state */ });
+                .catch(function() {
+                    // Request failed to reach the server (network error, etc.) so
+                    // the server never cancelled the item. Roll back the frozen state
+                    // so SSE progress events resume updating the card normally.
+                    if (card) card.removeAttribute('data-cancelling');
+                    btn.disabled = false;
+                    btn.textContent = 'Cancel';
+                });
         });
 
         connectEventSource();
