@@ -39,9 +39,17 @@ type DownloadManager struct {
 	outputFmt   string // "m4b" or "mp3"
 	embedCover  bool
 
-	// mediaServer is the active backend (Plex or Emby) used for scan triggers
-	// and collection management after each book is organized.
+	// mediaServer is the legacy single-active backend (Plex or Emby). Still
+	// used by reconcile and Settings UI rendering. Per-download fan-out
+	// goes through `destinations` instead — that's the multi-destination
+	// path that records per-(book, destination) state.
 	mediaServer mediaserver.Backend
+
+	// destinations runs the per-book post-organize fan-out across every
+	// enabled library_destinations row. Replaces the single-backend call
+	// from PR-0 in pipeline_stages.go. May be nil during early app boot
+	// before destinations are wired; pipeline guards on nil.
+	destinations *DestinationManager
 
 	// Pipeline concurrency settings
 	downloadConcurrency int
@@ -249,6 +257,7 @@ func NewDownloadManager(
 	decryptConcurrency int,
 	processConcurrency int,
 	mediaSvr mediaserver.Backend,
+	destinations *DestinationManager,
 ) *DownloadManager {
 	numCPU := runtime.NumCPU()
 
@@ -307,6 +316,7 @@ func NewDownloadManager(
 		outputFmt:           outputFmt,
 		embedCover:          embedCover,
 		mediaServer:         mediaSvr,
+		destinations:        destinations,
 		downloadConcurrency: downloadConcurrency,
 		decryptConcurrency:  decryptConcurrency,
 		processConcurrency:  processConcurrency,

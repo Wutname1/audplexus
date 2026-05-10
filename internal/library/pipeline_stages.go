@@ -363,29 +363,39 @@ func (dm *DownloadManager) handleProcessStage(ctx context.Context, item *pipelin
 	dm.cleanupDownloadFiles(item.ASIN)
 
 	// Run media-server post-organize work BEFORE marking the download complete.
-	// Previously this was fire-and-forget, which marked downloads as Complete
-	// even when scan trigger and series-collection ops failed silently.
-	if dm.mediaServer != nil {
-		organizedBook := mediaserver.OrganizedBook{
-			BookID:      book.ID,
-			ASIN:        book.ASIN,
-			Title:       book.Title,
-			Author:      book.Author,
-			LocalPath:   finalPath,
-			OrganizedAt: time.Now(),
-		}
-		if enriched != nil {
-			organizedBook.Title = enriched.Title()
-			organizedBook.Author = enriched.Author()
-			organizedBook.Series = enriched.Series()
-			organizedBook.SeriesPosition = enriched.SeriesPosition()
-		}
-		// Cover sidecar path for backends that prefer a sidecar (Emby/Jellyfin).
-		coverCandidate := filepath.Join(filepath.Dir(finalPath), "folder.jpg")
-		if _, statErr := os.Stat(coverCandidate); statErr == nil {
-			organizedBook.CoverPath = coverCandidate
-		}
+	// Multi-destination fan-out: every enabled library_destinations row has its
+	// backend's OnBookOrganized invoked concurrently (bounded). Per-destination
+	// outcomes are recorded in book_library_destinations by the manager.
+	// Falls back to single-backend mediaServer for installs that haven't run
+	// the first-boot synthesis yet (no destinations enabled).
+	organizedBook := mediaserver.OrganizedBook{
+		BookID:      book.ID,
+		ASIN:        book.ASIN,
+		Title:       book.Title,
+		Author:      book.Author,
+		LocalPath:   finalPath,
+		OrganizedAt: time.Now(),
+	}
+	if enriched != nil {
+		organizedBook.Title = enriched.Title()
+		organizedBook.Author = enriched.Author()
+		organizedBook.Series = enriched.Series()
+		organizedBook.SeriesPosition = enriched.SeriesPosition()
+	}
+	// Cover sidecar path for backends that prefer a sidecar (Emby/Jellyfin).
+	coverCandidate := filepath.Join(filepath.Dir(finalPath), "folder.jpg")
+	if _, statErr := os.Stat(coverCandidate); statErr == nil {
+		organizedBook.CoverPath = coverCandidate
+	}
 
+	switch {
+	case dm.destinations != nil:
+		results := dm.destinations.FanOut(ctx, organizedBook)
+		for _, r := range results {
+			logBookOutcomes(asinLog, "destination:"+r.Destination.DisplayName, book.ID, r.Outcomes)
+		}
+	case dm.mediaServer != nil:
+		// Legacy path — kept for safety until destinations are everywhere.
 		outcomes := dm.mediaServer.OnBookOrganized(ctx, organizedBook)
 		logBookOutcomes(asinLog, dm.mediaServer.Name(), book.ID, outcomes)
 	}
