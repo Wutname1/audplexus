@@ -43,6 +43,23 @@ func NewEmby(db database.Database, audnexusClient *audnexus.Client, libraryDir s
 
 func (e *EmbyBackend) Name() string { return string(TypeEmby) }
 
+// Capabilities — Emby is the most-capable backend: scan, per-item refresh,
+// BoxSet-based series grouping, per-item tags (used for franchise + series
+// library facets), image uploads (BoxSet covers + author primary images),
+// and item count.
+func (e *EmbyBackend) Capabilities() CapabilitySet {
+	return NewCapabilitySet(
+		CapTriggerScan,
+		CapPerItemRefresh,
+		CapSeriesGrouping,
+		CapFranchiseTag,
+		CapImageUpload,
+		CapItemCount,
+		CapAuthorImages,
+		CapBoxSetCovers,
+	)
+}
+
 func (e *EmbyBackend) Configured(ctx context.Context) bool {
 	u, k, l := e.settings(ctx)
 	return u != "" && k != "" && l != ""

@@ -133,3 +133,35 @@ func (s *settingsOnlyStubDB) ListDevices(ctx context.Context) ([]database.Device
 	return nil, nil
 }
 func (s *settingsOnlyStubDB) DeleteDevice(ctx context.Context, id int64) error { return nil }
+
+// Library destinations + book destinations (PR-B). Stub returns zero values.
+func (s *settingsOnlyStubDB) CreateLibraryDestination(ctx context.Context, d *database.LibraryDestination) error {
+	return nil
+}
+func (s *settingsOnlyStubDB) GetLibraryDestination(ctx context.Context, id string) (*database.LibraryDestination, error) {
+	return nil, nil
+}
+func (s *settingsOnlyStubDB) ListLibraryDestinations(ctx context.Context) ([]database.LibraryDestination, error) {
+	return nil, nil
+}
+func (s *settingsOnlyStubDB) ListEnabledLibraryDestinations(ctx context.Context) ([]database.LibraryDestination, error) {
+	return nil, nil
+}
+func (s *settingsOnlyStubDB) UpdateLibraryDestination(ctx context.Context, d *database.LibraryDestination) error {
+	return nil
+}
+func (s *settingsOnlyStubDB) DeleteLibraryDestination(ctx context.Context, id string) error {
+	return nil
+}
+func (s *settingsOnlyStubDB) UpsertBookDestination(ctx context.Context, bd *database.BookDestination) error {
+	return nil
+}
+func (s *settingsOnlyStubDB) GetBookDestinations(ctx context.Context, bookID int64) ([]database.BookDestination, error) {
+	return nil, nil
+}
+func (s *settingsOnlyStubDB) GetBookDestination(ctx context.Context, bookID int64, destID string) (*database.BookDestination, error) {
+	return nil, nil
+}
+func (s *settingsOnlyStubDB) ListBookDestinationsBy(ctx context.Context, destID string, state *database.BookDestinationSyncState) ([]database.BookDestination, error) {
+	return nil, nil
+}

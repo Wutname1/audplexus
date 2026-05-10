@@ -51,14 +51,47 @@ const (
 // breakdown. New backends may introduce new operation names; the schema for
 // per_op_outcomes is intentionally an open set.
 const (
-	OpScanTrigger     = "scan_trigger"      // ask the destination to index the new file
-	OpItemMatch       = "item_match"        // resolve the destination's internal item ID
-	OpSeriesGrouping  = "series_grouping"   // ensure the book is in its series collection
-	OpFranchiseTag    = "franchise_tag"     // set a franchise-level tag (Emby/Jellyfin only)
-	OpImageUpload     = "image_upload"      // upload a cover or author image
-	OpAuthorImage     = "author_image"      // attach an author/artist image
-	OpBoxSetCover     = "boxset_cover"      // attach a cover image to a series boxset
+	OpScanTrigger    = "scan_trigger"    // ask the destination to index the new file
+	OpItemMatch      = "item_match"      // resolve the destination's internal item ID
+	OpSeriesGrouping = "series_grouping" // ensure the book is in its series collection
+	OpFranchiseTag   = "franchise_tag"   // set a franchise-level tag (Emby/Jellyfin only)
+	OpImageUpload    = "image_upload"    // upload a cover or author image
+	OpAuthorImage    = "author_image"    // attach an author/artist image
+	OpBoxSetCover    = "boxset_cover"    // attach a cover image to a series boxset
 )
+
+// Capability is a declarative flag a backend exports so the UI can hide
+// affordances that don't apply (e.g. don't show the "franchise tagging"
+// toggle on Plex destinations). Capabilities are advisory, NOT a runtime
+// contract — every operation still returns a typed Outcome at runtime.
+// Per codex: never silently no-op, even when a capability is missing.
+type Capability string
+
+const (
+	CapTriggerScan    Capability = "trigger_scan"
+	CapPerItemRefresh Capability = "per_item_refresh"
+	CapSeriesGrouping Capability = "series_grouping"
+	CapFranchiseTag   Capability = "franchise_tag"
+	CapImageUpload    Capability = "image_upload"
+	CapItemCount      Capability = "item_count"
+	CapAuthorImages   Capability = "author_images"
+	CapBoxSetCovers   Capability = "boxset_covers"
+)
+
+// CapabilitySet is a small set helper for backend.Capabilities() return.
+type CapabilitySet map[Capability]bool
+
+// Has reports whether the capability is present.
+func (cs CapabilitySet) Has(c Capability) bool { return cs[c] }
+
+// NewCapabilitySet builds a CapabilitySet from a list of capabilities.
+func NewCapabilitySet(caps ...Capability) CapabilitySet {
+	cs := make(CapabilitySet, len(caps))
+	for _, c := range caps {
+		cs[c] = true
+	}
+	return cs
+}
 
 // Outcome is the result of one logical backend operation against one book.
 // Backends return a slice of Outcomes from OnBookOrganized so the caller can

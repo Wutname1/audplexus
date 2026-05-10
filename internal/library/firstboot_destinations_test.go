@@ -1,0 +1,131 @@
+package library
+
+import (
+	"context"
+	"path/filepath"
+	"testing"
+
+	"github.com/mstrhakr/audplexus/internal/database"
+)
+
+func newTestDB(t *testing.T) *database.SQLiteDB {
+	t.Helper()
+	db, err := database.NewSQLite(filepath.Join(t.TempDir(), "test.db"))
+	if err != nil {
+		t.Fatalf("NewSQLite: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	if err := db.Migrate(); err != nil {
+		t.Fatalf("Migrate: %v", err)
+	}
+	return db
+}
+
+func TestFirstBootSynthesisIsNoOpWhenDestinationsAlreadyExist(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Pre-create one destination — synthesis must not duplicate.
+	if err := db.CreateLibraryDestination(ctx, &database.LibraryDestination{
+		ID: "preexisting", DisplayName: "Existing", Type: database.LibraryDestinationTypePlex,
+		Enabled: true, URL: "http://x", PlexToken: "t", PlexSectionID: "1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Set legacy settings — synthesis SHOULD ignore them.
+	_ = db.SetSetting(ctx, "media_server_type", "plex")
+	_ = db.SetSetting(ctx, "plex_url", "http://other")
+	_ = db.SetSetting(ctx, "plex_token", "other-token")
+	_ = db.SetSetting(ctx, "plex_section_id", "9")
+
+	if err := SynthesizeLibraryDestinationsIfEmpty(ctx, db); err != nil {
+		t.Fatalf("SynthesizeLibraryDestinationsIfEmpty: %v", err)
+	}
+
+	all, _ := db.ListLibraryDestinations(ctx)
+	if len(all) != 1 {
+		t.Errorf("expected 1 destination (pre-existing), got %d", len(all))
+	}
+	if all[0].ID != "preexisting" {
+		t.Errorf("synthesis overwrote pre-existing destination — id was %q", all[0].ID)
+	}
+}
+
+func TestFirstBootSynthesisCreatesPlexFromLegacySettings(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	_ = db.SetSetting(ctx, "media_server_type", "plex")
+	_ = db.SetSetting(ctx, "plex_url", "http://plex.lan:32400")
+	_ = db.SetSetting(ctx, "plex_token", "tok")
+	_ = db.SetSetting(ctx, "plex_section_id", "5")
+
+	if err := SynthesizeLibraryDestinationsIfEmpty(ctx, db); err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+
+	all, _ := db.ListLibraryDestinations(ctx)
+	if len(all) != 1 {
+		t.Fatalf("expected 1 synthesized destination, got %d", len(all))
+	}
+	if all[0].Type != database.LibraryDestinationTypePlex || all[0].URL != "http://plex.lan:32400" || all[0].PlexToken != "tok" || all[0].PlexSectionID != "5" {
+		t.Errorf("synthesized plex destination wrong: %+v", all[0])
+	}
+}
+
+func TestFirstBootSynthesisCreatesEmbyFromLegacySettings(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	_ = db.SetSetting(ctx, "media_server_type", "emby")
+	_ = db.SetSetting(ctx, "emby_url", "http://emby.lan:8096")
+	_ = db.SetSetting(ctx, "emby_api_key", "key")
+	_ = db.SetSetting(ctx, "emby_library_id", "lib1")
+
+	if err := SynthesizeLibraryDestinationsIfEmpty(ctx, db); err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+
+	all, _ := db.ListLibraryDestinations(ctx)
+	if len(all) != 1 || all[0].Type != database.LibraryDestinationTypeEmby {
+		t.Fatalf("expected one emby destination, got %+v", all)
+	}
+	if all[0].URL != "http://emby.lan:8096" || all[0].APIKey != "key" || all[0].LibraryID != "lib1" {
+		t.Errorf("emby destination synthesis wrong: %+v", all[0])
+	}
+}
+
+func TestFirstBootSynthesisSkipsIncompleteConfig(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// Type is set but required fields are missing — silent skip, NOT a CHECK violation.
+	_ = db.SetSetting(ctx, "media_server_type", "plex")
+	_ = db.SetSetting(ctx, "plex_url", "http://plex.lan:32400")
+	// plex_token and plex_section_id intentionally empty
+
+	if err := SynthesizeLibraryDestinationsIfEmpty(ctx, db); err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+
+	all, _ := db.ListLibraryDestinations(ctx)
+	if len(all) != 0 {
+		t.Errorf("expected synthesis to skip incomplete config, but created %d destination(s): %+v", len(all), all)
+	}
+}
+
+func TestFirstBootSynthesisHandlesNoLegacyConfig(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+
+	// No env vars, no settings — fresh install. Synthesis should be a no-op.
+	if err := SynthesizeLibraryDestinationsIfEmpty(ctx, db); err != nil {
+		t.Fatalf("Synthesize: %v", err)
+	}
+
+	all, _ := db.ListLibraryDestinations(ctx)
+	if len(all) != 0 {
+		t.Errorf("expected 0 destinations on fresh install, got %d", len(all))
+	}
+}

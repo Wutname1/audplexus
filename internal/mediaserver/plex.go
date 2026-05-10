@@ -40,6 +40,18 @@ func buildPlexClientID() string {
 
 func (p *PlexBackend) Name() string { return string(TypePlex) }
 
+// Capabilities — Plex supports library scan, per-item refresh (via section
+// refresh with a path filter), and series grouping (via collections). It
+// does NOT support per-item tagging, image upload, or franchise tags.
+func (p *PlexBackend) Capabilities() CapabilitySet {
+	return NewCapabilitySet(
+		CapTriggerScan,
+		CapPerItemRefresh,
+		CapSeriesGrouping,
+		CapItemCount,
+	)
+}
+
 func (p *PlexBackend) Configured(ctx context.Context) bool {
 	u, t, s := p.settings(ctx)
 	return u != "" && t != "" && s != ""

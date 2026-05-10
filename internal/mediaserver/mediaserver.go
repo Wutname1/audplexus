@@ -44,6 +44,12 @@ type Backend interface {
 	// while not configured.
 	Configured(ctx context.Context) bool
 
+	// Capabilities returns the operations this backend supports. Used by the
+	// UI to hide affordances that don't apply per-destination (e.g. hiding
+	// the "franchise tagging" toggle on Plex). Advisory — runtime contract
+	// remains the typed Outcome.
+	Capabilities() CapabilitySet
+
 	// OnBookOrganized runs the per-book post-organize work synchronously.
 	// Each logical step (scan trigger, item match, series grouping, tagging,
 	// image upload, etc.) returns one Outcome. The slice is non-nil but may
