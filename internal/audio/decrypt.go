@@ -381,7 +381,7 @@ func (f *FFmpeg) ConvertToMP3(inputPath, outputPath string, bitrate string) erro
 // ConcatToM4B concatenates a list of audio files (in order) into a single
 // M4B output, transcoding to AAC. Used when reassembling chapter-split files
 // back into a single audiobook container.
-func (f *FFmpeg) ConcatToM4B(inputPaths []string, outputPath, bitrate string) error {
+func (f *FFmpeg) ConcatToM4B(inputPaths []string, outputPath, bitrate string, meta Metadata) error {
 	if len(inputPaths) == 0 {
 		return fmt.Errorf("concat: no input files")
 	}
@@ -412,16 +412,20 @@ func (f *FFmpeg) ConcatToM4B(inputPaths []string, outputPath, bitrate string) er
 	defer os.Remove(listPath)
 
 	decryptLog.Info().Int("inputs", len(inputPaths)).Str("output", outputPath).Msg("concatenating chapters into m4b")
-	return f.runTranscode(
+	metaArgs := buildMetadataArgs(meta)
+
+	args := []string{
 		"-f", "concat",
 		"-safe", "0",
 		"-i", listPath,
 		"-codec:a", "aac",
 		"-b:a", bitrate,
 		"-vn",
-		"-y",
-		outputPath,
-	)
+	}
+	args = append(args, metaArgs...)
+	args = append(args, "-y", outputPath)
+
+	return f.runTranscode(args...)
 }
 
 // SplitChapters splits an audio file into separate chapter files.
@@ -431,7 +435,7 @@ func (f *FFmpeg) ConcatToM4B(inputPaths []string, outputPath, bitrate string) er
 //
 // onChapter, when non-nil, is invoked after each chapter finishes encoding
 // with (1-based-index, total) so callers can report progress to the UI.
-func (f *FFmpeg) SplitChapters(inputPath, outputDir string, chapters []ChapterMark, format string, onChapter func(done, total int)) error {
+func (f *FFmpeg) SplitChapters(inputPath, outputDir string, chapters []ChapterMark, format string, meta Metadata, onChapter func(done, total int)) error {
 	decryptLog.Info().Str("input", inputPath).Int("chapters", len(chapters)).Str("format", format).Msg("splitting chapters")
 	ext := ".m4b"
 	codec := []string{"-c", "copy"}
@@ -444,6 +448,14 @@ func (f *FFmpeg) SplitChapters(inputPath, outputDir string, chapters []ChapterMa
 
 	for i, ch := range chapters {
 		outputPath := fmt.Sprintf("%s/%02d - %s%s", outputDir, i+1, sanitizeFilename(ch.Title), ext)
+		chapterMeta := meta
+		if strings.TrimSpace(ch.Title) != "" {
+			chapterMeta.Title = ch.Title
+		}
+		chapterMeta.Track = fmt.Sprintf("%d/%d", i+1, len(chapters))
+		if chapterMeta.Album == "" {
+			chapterMeta.Album = meta.Title
+		}
 		// -ss/-to MUST come before -i so ffmpeg uses input-side fast seek
 		// (jumps to the byte offset via the container index). Output-side
 		// seek decodes-and-discards from the start of the file, which on a
@@ -457,6 +469,7 @@ func (f *FFmpeg) SplitChapters(inputPath, outputDir string, chapters []ChapterMa
 		}
 		args = append(args, "-i", inputPath)
 		args = append(args, codec...)
+		args = append(args, buildMetadataArgs(chapterMeta)...)
 		args = append(args, "-y", outputPath)
 
 		chapterStart := time.Now()

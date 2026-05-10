@@ -398,6 +398,7 @@ func (dm *DownloadManager) handleProcessStage(parentCtx context.Context, item *p
 	// then organize that directory into the Plex book folder.
 	if dm.OutputFormat() == "mp3" {
 		chapters := enriched.ChapterMarks()
+		meta := enriched.ToAudioMetadata()
 		if len(chapters) == 0 {
 			asinLog.Warn().Msg("mp3 chapter-split requested but no chapter data available; falling back to single-file output")
 		} else {
@@ -434,7 +435,7 @@ func (dm *DownloadManager) handleProcessStage(parentCtx context.Context, item *p
 					Progress: progress,
 				})
 			}
-			if err := dm.ffmpeg.SplitChapters(decryptedPath, stageDir, chapters, "mp3", onChapter); err != nil {
+			if err := dm.ffmpeg.SplitChapters(decryptedPath, stageDir, chapters, "mp3", meta, onChapter); err != nil {
 				_ = os.RemoveAll(stageDir)
 				dm.cleanupDownloadFiles(item.ASIN)
 				if parentCtx.Err() == nil && errors.Is(err, context.Canceled) {

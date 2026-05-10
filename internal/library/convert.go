@@ -183,6 +183,7 @@ func isCrossDeviceErr(err error) bool {
 
 func (dm *DownloadManager) convertM4BToMP3(parentCtx, ctx context.Context, book *database.Book, enriched *audnexus.EnrichedBook, bookDir string, asinLog *logging.Logger) error {
 	chapters := enriched.ChapterMarks()
+	meta := enriched.ToAudioMetadata()
 	if len(chapters) == 0 {
 		return fmt.Errorf("no chapter data available for ASIN %s; cannot split into mp3", book.ASIN)
 	}
@@ -217,7 +218,7 @@ func (dm *DownloadManager) convertM4BToMP3(parentCtx, ctx context.Context, book 
 			Progress: progress,
 		})
 	}
-	if err := dm.ffmpeg.SplitChapters(srcM4B, stageDir, chapters, "mp3", onChapter); err != nil {
+	if err := dm.ffmpeg.SplitChapters(srcM4B, stageDir, chapters, "mp3", meta, onChapter); err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return fmt.Errorf("cancelled by user")
 		}
@@ -354,7 +355,7 @@ func (dm *DownloadManager) convertMP3ToM4B(parentCtx, ctx context.Context, book 
 		Stage:    "converting",
 		Progress: 0.05,
 	})
-	if err := dm.ffmpeg.ConcatToM4B(mp3Files, stagePath, "128k"); err != nil {
+	if err := dm.ffmpeg.ConcatToM4B(mp3Files, stagePath, "128k", enriched.ToAudioMetadata()); err != nil {
 		if errors.Is(ctx.Err(), context.Canceled) {
 			return fmt.Errorf("cancelled by user")
 		}
