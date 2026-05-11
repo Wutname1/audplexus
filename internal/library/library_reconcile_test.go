@@ -258,6 +258,41 @@ func TestExtractASINFromPathMatchesASINInFilename(t *testing.T) {
 	}
 }
 
+func TestFormatCountMap(t *testing.T) {
+	tests := []struct {
+		counts map[string]int
+		want   string
+	}{
+		{
+			counts: map[string]int{"warning": 2, "error": 1, "success": 5},
+			want:   "error=1,success=5,warning=2",
+		},
+		{
+			counts: map[string]int{"completed": 10},
+			want:   "completed=10",
+		},
+		{
+			counts: map[string]int{"zero": 0, "nonzero": 3},
+			want:   "nonzero=3",
+		},
+		{
+			counts: map[string]int{},
+			want:   "none",
+		},
+		{
+			counts: map[string]int{"a": 0, "b": 0, "c": 0},
+			want:   "none",
+		},
+	}
+
+	for _, tt := range tests {
+		got := formatCountMap(tt.counts)
+		if got != tt.want {
+			t.Fatalf("formatCountMap(%v) = %q, want %q", tt.counts, got, tt.want)
+		}
+	}
+}
+
 func containsPath(paths []string, want string) bool {
 	for _, p := range paths {
 		if p == want {
