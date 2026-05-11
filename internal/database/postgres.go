@@ -281,37 +281,120 @@ func (p *PostgresDB) CancelDownload(ctx context.Context, id int64) error {
 }
 
 func (p *PostgresDB) RetryDownload(ctx context.Context, id int64) error {
-	// Reset the download queue entry
-	_, err := p.db.ExecContext(ctx,
-		`UPDATE download_queue SET status = $1, error = '', progress = 0, started_at = NULL, completed_at = NULL, updated_at = $2 WHERE id = $3 AND status = $4`,
-		DownloadStatusPending, time.Now(), id, DownloadStatusFailed)
+	tx, err := p.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return fmt.Errorf("retry download: begin tx: %w", err)
 	}
-	// Also reset the book status back to queued
-	_, err = p.db.ExecContext(ctx,
-		`UPDATE books SET status = $1, updated_at = $2 WHERE id = (SELECT book_id FROM download_queue WHERE id = $3)`,
-		BookStatusQueued, time.Now(), id)
-	return err
+	defer tx.Rollback()
+
+	var asin string
+	var bookID int64
+	var priority int
+	err = tx.QueryRowContext(ctx,
+		`SELECT asin, book_id, priority FROM download_queue WHERE id = $1 AND status = $2`,
+		id, DownloadStatusFailed).Scan(&asin, &bookID, &priority)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil
+		}
+		return fmt.Errorf("retry download: lookup: %w", err)
+	}
+
+	now := time.Now()
+	// Cancel ALL failed entries for this ASIN to prevent duplicate queuing.
+	_, err = tx.ExecContext(ctx,
+		`UPDATE download_queue SET status = $1, updated_at = $2 WHERE asin = $3 AND status = $4`,
+		DownloadStatusCancelled, now, asin, DownloadStatusFailed)
+	if err != nil {
+		return fmt.Errorf("retry download: cancel duplicates: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`INSERT INTO download_queue (book_id, asin, priority, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		bookID, asin, priority, DownloadStatusPending, now, now)
+	if err != nil {
+		return fmt.Errorf("retry download: enqueue: %w", err)
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE books SET status = $1, updated_at = $2 WHERE id = $3`,
+		BookStatusQueued, now, bookID)
+	if err != nil {
+		return fmt.Errorf("retry download: reset book: %w", err)
+	}
+
+	return tx.Commit()
 }
 
 func (p *PostgresDB) RetryAllDownloads(ctx context.Context) (int64, error) {
+	tx, err := p.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("retry all: begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
 	now := time.Now()
-	// Reset all failed book statuses back to queued
-	_, err := p.db.ExecContext(ctx,
-		`UPDATE books SET status = $1, updated_at = $2 WHERE id IN (SELECT book_id FROM download_queue WHERE status = $3)`,
-		BookStatusQueued, now, DownloadStatusFailed)
+
+	rows, err := tx.QueryContext(ctx,
+		`SELECT asin, book_id, MAX(priority) as priority
+		 FROM download_queue WHERE status = $1
+		 GROUP BY asin, book_id`,
+		DownloadStatusFailed)
 	if err != nil {
+		return 0, fmt.Errorf("retry all: list failed: %w", err)
+	}
+	type entry struct {
+		asin     string
+		bookID   int64
+		priority int
+	}
+	var entries []entry
+	for rows.Next() {
+		var e entry
+		if err := rows.Scan(&e.asin, &e.bookID, &e.priority); err != nil {
+			rows.Close()
+			return 0, fmt.Errorf("retry all: scan: %w", err)
+		}
+		entries = append(entries, e)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		return 0, err
 	}
-	// Reset all failed download queue entries
-	result, err := p.db.ExecContext(ctx,
-		`UPDATE download_queue SET status = $1, error = '', progress = 0, started_at = NULL, completed_at = NULL, updated_at = $2 WHERE status = $3`,
-		DownloadStatusPending, now, DownloadStatusFailed)
-	if err != nil {
+
+	var toRetry []entry
+	for _, e := range entries {
+		var count int
+		_ = tx.QueryRowContext(ctx,
+			`SELECT COUNT(*) FROM download_queue WHERE asin = $1 AND status IN ($2, $3)`,
+			e.asin, DownloadStatusPending, DownloadStatusActive).Scan(&count)
+		if count == 0 {
+			toRetry = append(toRetry, e)
+		}
+	}
+
+	for _, e := range toRetry {
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE download_queue SET status = $1, updated_at = $2 WHERE asin = $3 AND status = $4`,
+			DownloadStatusCancelled, now, e.asin, DownloadStatusFailed); err != nil {
+			return 0, fmt.Errorf("retry all: cancel %s: %w", e.asin, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`INSERT INTO download_queue (book_id, asin, priority, status, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+			e.bookID, e.asin, e.priority, DownloadStatusPending, now, now); err != nil {
+			return 0, fmt.Errorf("retry all: enqueue %s: %w", e.asin, err)
+		}
+		if _, err := tx.ExecContext(ctx,
+			`UPDATE books SET status = $1, updated_at = $2 WHERE id = $3`,
+			BookStatusQueued, now, e.bookID); err != nil {
+			return 0, fmt.Errorf("retry all: reset book %s: %w", e.asin, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
-	return result.RowsAffected()
+	return int64(len(toRetry)), nil
 }
 
 // --- Sync History ---

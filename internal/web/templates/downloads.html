@@ -71,13 +71,13 @@
     </tbody>
 </table>
 
-<h2>Failed (<span id="failed-count">{{len .Failed}}</span>)</h2>
+<h2>Recent Errors (<span id="failed-count">{{len .RecentErrors}}</span>)</h2>
 <table class="data-table" id="failed-table">
-    <thead><tr><th>ASIN</th><th>Error</th><th>Actions</th></tr></thead>
+    <thead><tr><th>Title</th><th>Error</th><th>Actions</th></tr></thead>
     <tbody id="failed-body">
-    {{range .Failed}}
+    {{range .RecentErrors}}
     <tr id="failed-{{.ID}}">
-        <td>{{.ASIN}}</td>
+        <td>{{with index $.DownloadTitles .ASIN}}{{.}}{{else}}{{.ASIN}}{{end}}</td>
         <td class="error-text">{{.Error}}</td>
         <td><button hx-post="/api/downloads/retry/{{.ID}}" hx-swap="none" hx-on::after-request="this.closest('tr').remove()" class="btn btn-small btn-primary">Retry</button></td>
     </tr>

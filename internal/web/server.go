@@ -815,30 +815,45 @@ func (s *Server) handleDownloads(c *gin.Context) {
 	completeStatus := database.DownloadStatusComplete
 	complete, _ := s.db.ListDownloads(ctx, &completeStatus)
 	failedStatus := database.DownloadStatusFailed
-	failed, _ := s.db.ListDownloads(ctx, &failedStatus)
+	allFailed, _ := s.db.ListDownloads(ctx, &failedStatus)
+	recentErrors := deduplicateFailedByASIN(allFailed)
 	queueState := s.downloads.QueueState()
 
-	// Build title lookup so the Pipeline tab's tables show book titles
-	// instead of ASINs in the Title column. Pre-existing bug: the
-	// downloads.html template had <td>{{.ASIN}}</td> in the Title
-	// column for both Complete and (likely) other tables.
-	rowsForTitles := make([]database.DownloadQueue, 0, len(active)+len(pending)+len(complete)+len(failed))
+	rowsForTitles := make([]database.DownloadQueue, 0, len(active)+len(pending)+len(complete)+len(allFailed))
 	rowsForTitles = append(rowsForTitles, active...)
 	rowsForTitles = append(rowsForTitles, pending...)
 	rowsForTitles = append(rowsForTitles, complete...)
-	rowsForTitles = append(rowsForTitles, failed...)
+	rowsForTitles = append(rowsForTitles, allFailed...)
 
 	c.HTML(http.StatusOK, "downloads.html", gin.H{
 		"Active":           active,
 		"Pending":          pending,
 		"Complete":         complete,
-		"Failed":           failed,
+		"RecentErrors":     recentErrors,
 		"DownloadTitles":   s.getDownloadTitles(ctx, rowsForTitles),
 		"QueuePaused":      queueState.Paused,
 		"QueuePauseReason": queueState.Reason,
 		"QueuePausedAt":    queueState.PausedAt,
 		"Page":             "pipeline",
 	})
+}
+
+// deduplicateFailedByASIN returns at most one entry per ASIN from a slice of
+// failed download queue rows, keeping the most recently updated entry.
+func deduplicateFailedByASIN(rows []database.DownloadQueue) []database.DownloadQueue {
+	seen := make(map[string]int, len(rows)) // asin → index in result
+	result := make([]database.DownloadQueue, 0, len(rows))
+	for _, r := range rows {
+		if i, ok := seen[r.ASIN]; ok {
+			if r.UpdatedAt.After(result[i].UpdatedAt) {
+				result[i] = r
+			}
+		} else {
+			seen[r.ASIN] = len(result)
+			result = append(result, r)
+		}
+	}
+	return result
 }
 
 // clearStaleFailedDownloads reconciles failed download rows for books that are already complete on disk.
