@@ -314,16 +314,11 @@ func (s *Server) setupRoutes() {
 	s.router.POST("/auth/marketplace", s.handleAudibleMarketplaceSelect)
 	s.router.POST("/auth/start", s.handleAuthStart)
 	s.router.POST("/auth/callback", s.handleAuthCallback)
-	s.router.POST("/auth/plex/start", s.handlePlexStart)
-	s.router.POST("/auth/plex/poll", s.handlePlexPoll)
-	s.router.POST("/auth/plex/complete", s.handlePlexComplete)
-	s.router.POST("/auth/plex/select", s.handlePlexSelect)
-	s.router.POST("/auth/plex/section", s.handlePlexSectionSelect)
-	s.router.POST("/auth/plex/scan", s.handlePlexScan)
-	s.router.POST("/auth/plex/check", s.handlePlexCheck)
-	// Legacy /auth/emby/* and /auth/media-server/select removed: the UI
-	// surfaces that posted to them (the dedicated Emby panel + Active
-	// Media Server radio) are gone in favor of /destinations/* CRUD.
+	// Legacy /auth/plex/*, /auth/emby/* and /auth/media-server/select removed:
+	// the UI surfaces that posted to them (Plex PIN sign-in panel, dedicated
+	// Emby panel, Active Media Server radio) are gone in favor of
+	// /destinations/* CRUD. Plex sign-in is re-introduced as a per-
+	// destination affordance — see /destinations/plex/* below.
 	s.router.POST("/settings/tag-profile", s.handleTagProfileSelect)
 
 	// Library destinations CRUD (multi-destination model). Two-page flow
