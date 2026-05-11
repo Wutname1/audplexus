@@ -236,6 +236,29 @@
                     </div>
                     <small class="muted">Asks Emby which libraries this key can see and fills the Library ID below. Or paste the ItemId manually if you already have it.</small>
                 </div>
+                {{else if eq $dt "jellyfin"}}
+                {{/*
+                  Jellyfin exposes its libraries via /Library/VirtualFolders
+                  with Authorization: MediaBrowser Token=... — the picker
+                  filters to CollectionType="books".
+                */}}
+                <div class="form-group">
+                    <label>Discover libraries</label>
+                    <div>
+                        <button type="button" class="btn btn-secondary"
+                                hx-post="{{if $isEdit}}/destinations/{{.Dest.ID}}/discover/jellyfin{{else}}/destinations/discover/jellyfin{{end}}"
+                                hx-include="closest form"
+                                hx-target="#jellyfin-discover-result"
+                                hx-swap="innerHTML"
+                                hx-disabled-elt="this"
+                                hx-on::before-request="document.getElementById('jellyfin-discover-result').setAttribute('aria-busy', 'true'); document.getElementById('jellyfin-discover-result').textContent = 'Listing libraries…';"
+                                hx-on::after-request="document.getElementById('jellyfin-discover-result').setAttribute('aria-busy', 'false');">
+                            Discover libraries
+                        </button>
+                        <div id="jellyfin-discover-result" role="status" aria-live="polite" aria-atomic="true" aria-busy="false" style="margin-top:.5rem"></div>
+                    </div>
+                    <small class="muted">Asks Jellyfin which libraries this key can see and fills the Library ID below. Or paste the ItemId manually if you already have it.</small>
+                </div>
                 {{end}}
                 <div class="form-group">
                     <label for="library_id">Library ID</label>
@@ -253,9 +276,10 @@
                         </ol>
                         {{else if eq $dt "jellyfin"}}
                         <ol style="margin:.5rem 0 0 1.25rem;padding:0">
-                            <li>In a terminal, run: <code>curl -H 'X-Emby-Token: &lt;your_key&gt;' 'http://&lt;jellyfin&gt;:8096/Library/VirtualFolders' | jq</code></li>
+                            <li>In a terminal, run: <code>curl -H 'Authorization: MediaBrowser Token="&lt;your_key&gt;"' 'http://&lt;jellyfin&gt;:8096/Library/VirtualFolders' | jq</code></li>
                             <li>Find the entry with <code>"CollectionType": "books"</code> and an audiobook path.</li>
                             <li>Copy its <code>ItemId</code> field. That&apos;s your library ID.</li>
+                            <li>The legacy <code>X-Emby-Token</code> header still works on Jellyfin 10.x but is removed in 12.0 — use the <code>Authorization: MediaBrowser</code> scheme above.</li>
                         </ol>
                         {{else if eq $dt "abs"}}
                         <ol style="margin:.5rem 0 0 1.25rem;padding:0">

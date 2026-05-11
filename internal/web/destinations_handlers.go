@@ -289,6 +289,44 @@ func (s *Server) handleDestinationsDiscoverEmby(c *gin.Context) {
 	renderEmbyLikeDiscover(c, rows, "audiobooks", "Emby", "emby_discover_picker", "", "")
 }
 
+// handleDestinationsDiscoverJellyfin calls /Library/VirtualFolders and
+// renders a <select> picker for audiobook libraries. Mirror of the Emby
+// discover handler; filter is CollectionType="books".
+//
+// Two routes hit this handler:
+//   POST /destinations/discover/jellyfin           — form values
+//   POST /destinations/:id/discover/jellyfin       — saved row, api_key carried
+func (s *Server) handleDestinationsDiscoverJellyfin(c *gin.Context) {
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 10*time.Second)
+	defer cancel()
+
+	urlStr := strings.TrimSpace(c.PostForm("url"))
+	apiKey, err := s.resolveAPIKeyFromForm(c)
+	if err != nil {
+		renderEmbyLikeDiscover(c, nil, "books", "Jellyfin", "jellyfin_discover_picker", err.Error(), "")
+		return
+	}
+	if urlStr == "" {
+		renderEmbyLikeDiscover(c, nil, "books", "Jellyfin", "jellyfin_discover_picker", "Enter the Jellyfin URL first.", "")
+		return
+	}
+	if err := validateRemoteURL(urlStr); err != nil {
+		renderEmbyLikeDiscover(c, nil, "books", "Jellyfin", "jellyfin_discover_picker", err.Error(), "")
+		return
+	}
+
+	libs, err := mediaserver.JellyfinListLibraries(ctx, urlStr, apiKey)
+	if err != nil {
+		renderEmbyLikeDiscover(c, nil, "books", "Jellyfin", "jellyfin_discover_picker", "Could not list libraries: "+err.Error(), "")
+		return
+	}
+	rows := make([]mediaServerLibrary, 0, len(libs))
+	for _, l := range libs {
+		rows = append(rows, mediaServerLibrary{ID: l.ID, Name: l.Name, Kind: l.CollectionType, Path: l.Path})
+	}
+	renderEmbyLikeDiscover(c, rows, "books", "Jellyfin", "jellyfin_discover_picker", "", "")
+}
+
 // mediaServerLibrary is the generic row shape consumed by renderEmbyLikeDiscover.
 // Used to share rendering between Emby and Jellyfin (and any future
 // backend whose libraries have an id, a name, a kind, and an optional
