@@ -16,6 +16,7 @@ import (
 	"net/netip"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -790,9 +791,14 @@ func (s *Server) handleBookDetail(c *gin.Context) {
 		return
 	}
 
+	folderPath, files := buildBookFileDetails(book.FilePath)
+
 	data := gin.H{
-		"Book": book,
-		"Page": "library",
+		"Book":          book,
+		"Page":          "library",
+		"BookFolderPath": folderPath,
+		"BookFiles":     files,
+		"BookFileCount": len(files),
 	}
 
 	if c.Query("view") == "modal" || c.GetHeader("HX-Request") == "true" {
@@ -801,6 +807,93 @@ func (s *Server) handleBookDetail(c *gin.Context) {
 	}
 
 	c.HTML(http.StatusOK, "book_detail.html", data)
+}
+
+type bookFileDetail struct {
+	Name         string
+	RelativePath string
+	SizeBytes    int64
+	SizeLabel    string
+	ModifiedAt   string
+	IsPrimary    bool
+}
+
+func buildBookFileDetails(storedPath string) (string, []bookFileDetail) {
+	storedPath = strings.TrimSpace(storedPath)
+	if storedPath == "" {
+		return "", nil
+	}
+
+	cleanPath := filepath.Clean(storedPath)
+	info, err := os.Stat(cleanPath)
+	if err != nil {
+		if filepath.Ext(cleanPath) != "" {
+			return filepath.Dir(cleanPath), nil
+		}
+		return cleanPath, nil
+	}
+
+	folderPath := cleanPath
+	primaryPath := ""
+	if !info.IsDir() {
+		folderPath = filepath.Dir(cleanPath)
+		primaryPath = cleanPath
+	}
+
+	entries := make([]bookFileDetail, 0, 8)
+	_ = filepath.WalkDir(folderPath, func(path string, d os.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return nil
+		}
+		if d.IsDir() {
+			return nil
+		}
+
+		fi, err := d.Info()
+		if err != nil {
+			return nil
+		}
+
+		relPath := d.Name()
+		if rel, err := filepath.Rel(folderPath, path); err == nil {
+			relPath = rel
+		}
+
+		entries = append(entries, bookFileDetail{
+			Name:         d.Name(),
+			RelativePath: relPath,
+			SizeBytes:    fi.Size(),
+			SizeLabel:    humanFileSize(fi.Size()),
+			ModifiedAt:   fi.ModTime().Format("2006-01-02 15:04"),
+			IsPrimary:    path == primaryPath,
+		})
+		return nil
+	})
+
+	sort.Slice(entries, func(i, j int) bool {
+		left := strings.ToLower(entries[i].RelativePath)
+		right := strings.ToLower(entries[j].RelativePath)
+		if left == right {
+			return entries[i].RelativePath < entries[j].RelativePath
+		}
+		return left < right
+	})
+
+	return folderPath, entries
+}
+
+func humanFileSize(sizeBytes int64) string {
+	units := []string{"B", "KiB", "MiB", "GiB", "TiB"}
+	size := float64(sizeBytes)
+	unitIdx := 0
+	for size >= 1024 && unitIdx < len(units)-1 {
+		size /= 1024
+		unitIdx++
+	}
+	if unitIdx == 0 {
+		return fmt.Sprintf("%d %s", sizeBytes, units[unitIdx])
+	}
+	return fmt.Sprintf("%.1f %s", size, units[unitIdx])
 }
 
 // handleDownloads renders the download queue page.

@@ -14,7 +14,35 @@
         <p><strong>Released:</strong> {{formatDate .Book.ReleaseDate}}</p>
         <p><strong>Status:</strong> <span class="badge {{statusBadge .Book.Status}}" id="status-book-{{.Book.ID}}">{{.Book.Status}}</span></p>
         <p><strong>ASIN:</strong> {{.Book.ASIN}}</p>
-        {{if .Book.FilePath}}<p><strong>File:</strong> {{.Book.FilePath}}</p>{{end}}
+        {{if .BookFolderPath}}<p><strong>Folder:</strong> {{.BookFolderPath}}</p>{{end}}
+        {{if gt .BookFileCount 0}}
+        <details class="book-files-details">
+            <summary>Show files and details ({{.BookFileCount}})</summary>
+            <table class="book-files-table">
+                <thead>
+                    <tr>
+                        <th>Path</th>
+                        <th>Size</th>
+                        <th>Modified</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {{range .BookFiles}}
+                    <tr>
+                        <td>
+                            {{.RelativePath}}
+                            {{if .IsPrimary}}<span class="badge badge-type">Primary</span>{{end}}
+                        </td>
+                        <td>{{.SizeLabel}}</td>
+                        <td>{{.ModifiedAt}}</td>
+                    </tr>
+                    {{end}}
+                </tbody>
+            </table>
+        </details>
+        {{else if .Book.FilePath}}
+        <p><strong>Files:</strong> Unable to list files from disk right now.</p>
+        {{end}}
 
         <div class="book-actions">
             {{if eq (printf "%s" .Book.Status) "new"}}

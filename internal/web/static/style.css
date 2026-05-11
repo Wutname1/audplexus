@@ -326,6 +326,58 @@ h2 { margin: 1.5rem 0 0.75rem; font-size: 1.2rem; color: var(--text-muted); }
 .description p { line-height: 1.6; }
 .series { color: var(--accent); font-style: italic; }
 
+.book-files-details {
+    margin-top: 0.6rem;
+}
+
+.book-files-details > summary {
+    display: inline-block;
+    cursor: pointer;
+    color: #9cc9ff;
+    padding: 0.35rem 0.55rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: rgba(15, 52, 96, 0.35);
+    user-select: none;
+}
+
+.book-files-details[open] > summary {
+    margin-bottom: 0.55rem;
+}
+
+.book-files-table {
+    width: 100%;
+    border-collapse: collapse;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+    font-size: 0.86rem;
+}
+
+.book-files-table th,
+.book-files-table td {
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--border);
+    text-align: left;
+    vertical-align: top;
+}
+
+.book-files-table td:first-child {
+    word-break: break-word;
+}
+
+.book-files-table th {
+    color: var(--text-muted);
+    background: rgba(15, 52, 96, 0.45);
+    text-transform: uppercase;
+    font-size: 0.72rem;
+    letter-spacing: 0.04em;
+}
+
+.book-files-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
 .book-description-html p {
     margin: 0.6rem 0;
     line-height: 1.6;
