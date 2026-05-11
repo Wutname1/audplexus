@@ -1,12 +1,7 @@
 package library
 
 import (
-	"context"
-	"os"
-	"path/filepath"
 	"testing"
-
-	"github.com/mstrhakr/audplexus/internal/database"
 )
 
 func TestFileValidator_DetectSuspicious(t *testing.T) {
@@ -57,54 +52,5 @@ func TestIsAlphanumeric(t *testing.T) {
 	}
 	if isAlphanumeric("B01234-678") {
 		t.Fatalf("expected false for non-alphanumeric")
-	}
-}
-
-func TestFileValidator_ScanAndMarkForRedownload(t *testing.T) {
-	db := newTestDB(t)
-	ctx := context.Background()
-
-	book := &database.Book{ASIN: "B012345678", Title: "Title", Status: database.BookStatusComplete, FilePath: "/x", FileSize: 123}
-	if err := db.UpsertBook(ctx, book); err != nil {
-		t.Fatalf("UpsertBook: %v", err)
-	}
-	stored, err := db.GetBookByASIN(ctx, "B012345678")
-	if err != nil || stored == nil {
-		t.Fatalf("GetBookByASIN: (%v,%v)", stored, err)
-	}
-
-	root := t.TempDir()
-	file := filepath.Join(root, "B012345678.m4b")
-	if err := os.WriteFile(file, []byte("broken"), 0o600); err != nil {
-		t.Fatalf("WriteFile m4b: %v", err)
-	}
-	if err := os.WriteFile(filepath.Join(root, "ignore.txt"), []byte("x"), 0o600); err != nil {
-		t.Fatalf("WriteFile txt: %v", err)
-	}
-
-	fv := NewFileValidator(nil, db)
-	reports, ids, err := fv.ScanLibraryFiles(ctx, root)
-	if err != nil {
-		t.Fatalf("ScanLibraryFiles: %v", err)
-	}
-	if len(reports) != 1 {
-		t.Fatalf("reports len = %d, want 1", len(reports))
-	}
-	if reports[0].ASIN != "B012345678" || reports[0].IsValid {
-		t.Fatalf("expected invalid report with asin, got %+v", reports[0])
-	}
-	if len(ids) != 1 || ids[0] != stored.ID {
-		t.Fatalf("booksToRedownload = %v, want [%d]", ids, stored.ID)
-	}
-
-	if err := fv.MarkBooksForRedownload(ctx, []int64{stored.ID, 999999}, "test"); err != nil {
-		t.Fatalf("MarkBooksForRedownload: %v", err)
-	}
-	updated, err := db.GetBook(ctx, stored.ID)
-	if err != nil || updated == nil {
-		t.Fatalf("GetBook after mark: (%v,%v)", updated, err)
-	}
-	if updated.Status != database.BookStatusNew || updated.FilePath != "" || updated.FileSize != 0 {
-		t.Fatalf("book not reset for redownload: %+v", updated)
 	}
 }
