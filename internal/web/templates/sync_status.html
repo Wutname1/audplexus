@@ -29,18 +29,16 @@
 				{{if .Message}}
 				<span class="phase-detail{{if eq .Status "failed"}} error{{end}}">{{.Message}}</span>
 				{{end}}
-				{{if gt .DisplayTotal 0}}
+				{{if and (or (not .SubPhases) (le (len .SubPhases) 1)) (gt .DisplayTotal 0)}}
 				<span class="phase-count">{{.DisplayCurrent}} / {{.DisplayTotal}}</span>
-				{{else}}
-					{{if gt .Total 0}}
+				{{else if and (or (not .SubPhases) (le (len .SubPhases) 1)) (gt .Total 0)}}
 					<span class="phase-count">{{.Current}} / {{.Total}}</span>
-					{{end}}
 				{{end}}
 				{{if not $.Running}}
 				<button class="phase-run-btn" hx-post="/api/sync/phase/{{.Name}}" hx-target="closest .sync-status-wrap" hx-swap="innerHTML" title="Run {{.Label}}">&#9654;</button>
 				{{end}}
 			</div>
-			{{if and .Indeterminate (eq .Status "running")}}
+			{{if or (and .Indeterminate (eq .Status "running")) (and .SubPhases (gt (len .SubPhases) 1) (eq .Status "running"))}}
 			<div class="phase-progress-track indeterminate"><div class="phase-progress-fill"></div></div>
 			{{else}}
 			<div class="phase-progress-track"><div class="phase-progress-fill" style="width:{{printf "%.0f" (mul .Percent 100)}}%"></div></div>
@@ -52,6 +50,7 @@
 					<span class="sub-phase-icon">{{if eq .Status "complete"}}&#10003;{{else if eq .Status "failed"}}&#10007;{{else if eq .Status "running"}}&#9679;{{else}}&#9675;{{end}}</span>
 					<span class="sub-phase-label">{{.Label}}</span>
 					{{if .Message}}<span class="sub-phase-detail">{{.Message}}</span>{{end}}
+					{{if gt .Total 0}}<span class="sub-phase-count">{{.Current}} / {{.Total}}</span>{{end}}
 				</div>
 				{{end}}
 			</div>

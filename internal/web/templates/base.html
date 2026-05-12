@@ -37,6 +37,72 @@
         var reconnectDelay = 1000;
         var maxReconnectDelay = 15000;
         var stageRateState = {};
+        var syncPhaseSubPhasesCache = {};
+
+        function cloneJSON(v) {
+            return JSON.parse(JSON.stringify(v));
+        }
+
+        function msgHasRatio(msg, current, total) {
+            if (!msg || total <= 0) return false;
+            var compactMsg = String(msg).replace(/\s+/g, '');
+            var ratio = String(current || 0) + '/' + String(total);
+            return compactMsg.indexOf(ratio) !== -1;
+        }
+
+        function normalizePhaseSubPhases(phase, running) {
+            if (!phase || !phase.name) return phase;
+
+            var cached = syncPhaseSubPhasesCache[phase.name] || null;
+            var hasIncoming = phase.sub_phases && phase.sub_phases.length > 0;
+
+            if (!hasIncoming && cached && (phase.status === 'complete' || phase.status === 'failed' || !running)) {
+                phase.sub_phases = cloneJSON(cached);
+                return phase;
+            }
+
+            if (!hasIncoming) return phase;
+
+            // Merge missing current/total from cache so final completed rows keep counts.
+            var merged = [];
+            var seen = {};
+            for (var i = 0; i < phase.sub_phases.length; i++) {
+                var sp = phase.sub_phases[i] || {};
+                var key = (sp.id || '') + '|' + (sp.label || '');
+                var fromCache = null;
+                if (cached) {
+                    for (var j = 0; j < cached.length; j++) {
+                        var csp = cached[j] || {};
+                        if ((csp.id || '') === (sp.id || '') && (csp.label || '') === (sp.label || '')) {
+                            fromCache = csp;
+                            break;
+                        }
+                    }
+                }
+
+                if (fromCache) {
+                    if (!(sp.total > 0) && (fromCache.total > 0)) sp.total = fromCache.total;
+                    if (!(sp.current >= 0) && (fromCache.current >= 0)) sp.current = fromCache.current;
+                    if (sp.status === 'complete' && sp.total > 0 && !(sp.current > 0)) sp.current = fromCache.current || sp.total;
+                }
+
+                merged.push(sp);
+                seen[key] = true;
+            }
+
+            // For final states, include cached rows that may be omitted by final payloads.
+            if (cached && (phase.status === 'complete' || phase.status === 'failed' || !running)) {
+                for (var k = 0; k < cached.length; k++) {
+                    var extra = cached[k] || {};
+                    var extraKey = (extra.id || '') + '|' + (extra.label || '');
+                    if (!seen[extraKey]) merged.push(cloneJSON(extra));
+                }
+            }
+
+            phase.sub_phases = merged;
+            syncPhaseSubPhasesCache[phase.name] = cloneJSON(phase.sub_phases);
+            return phase;
+        }
 
         // escHTML escapes a string for safe interpolation into innerHTML.
         // ASINs, titles, and stage names come from upstream services; we
@@ -170,6 +236,7 @@
             else if (p.status === 'failed') icon = '&#10007;';
             else if (p.status === 'running') icon = '&#9679;';
             else if (p.status === 'skipped') icon = '&#8212;';
+            var hasMultipleDestinations = p.sub_phases && p.sub_phases.length > 1;
 
             var idAttr = opts.id ? ' id="' + opts.id + '"' : '';
             var html = '<div class="sync-phase ' + p.status + '"' + idAttr + '>';
@@ -180,14 +247,21 @@
                 var detailClass = opts.detailClass ? ' ' + opts.detailClass : '';
                 html += '<span class="phase-detail' + detailClass + '">' + p.message + '</span>';
             }
-            if ((p.total || 0) > 0) html += '<span class="phase-count">' + (p.current || 0) + ' / ' + p.total + '</span>';
+            if (!hasMultipleDestinations && (p.total || 0) > 0) html += '<span class="phase-count">' + (p.current || 0) + ' / ' + p.total + '</span>';
             if (opts.showRunBtn) {
                 html += '<button class="phase-run-btn" hx-post="/api/sync/phase/' + p.name + '" hx-target="closest .sync-status-wrap" hx-swap="innerHTML" title="Run ' + (p.label || '') + '">&#9654;</button>';
             }
             html += '</div>';
 
-            if (p.indeterminate && p.status === 'running') {
+            // Use throbber for phases with multiple destinations (indeterminate progress)
+            // Individual destination progress shown in sub-phases below
+            var useThrobber = (p.indeterminate || hasMultipleDestinations) && p.status === 'running';
+            
+            if (useThrobber) {
                 html += '<div class="phase-progress-track indeterminate"><div class="phase-progress-fill"></div></div>';
+            } else if (p.status === 'running') {
+                var pct = Math.max(0, Math.min(100, Math.round((p.percent || 0) * 100)));
+                html += '<div class="phase-progress-track"><div class="phase-progress-fill" style="width:' + pct + '%"></div></div>';
             } else {
                 var pct = Math.max(0, Math.min(100, Math.round((p.percent || 0) * 100)));
                 html += '<div class="phase-progress-track"><div class="phase-progress-fill" style="width:' + pct + '%"></div></div>';
@@ -202,6 +276,9 @@
                     html += '<span class="sub-phase-icon">' + spIcon + '</span>';
                     html += '<span class="sub-phase-label">' + (sp.label || '') + '</span>';
                     if (sp.message) html += '<span class="sub-phase-detail">' + sp.message + '</span>';
+                    if ((sp.total || 0) > 0 && !msgHasRatio(sp.message, sp.current || 0, sp.total)) {
+                        html += '<span class="sub-phase-count">' + (sp.current || 0) + ' / ' + sp.total + '</span>';
+                    }
                     html += '</div>';
                 }
                 html += '</div>';
@@ -249,6 +326,15 @@
             var el = document.getElementById('sync-status');
             if (!el) return;
 
+            // Keep last known per-destination progress so completion/final events
+            // that omit or clear sub_phases still render final counts.
+            if (d.phases && d.phases.length > 0) {
+                for (var pi = 0; pi < d.phases.length; pi++) {
+                    var cp = d.phases[pi];
+                    normalizePhaseSubPhases(cp, d.running);
+                }
+            }
+
             if (d.running) {
                 // During running state: update individual phases for smooth progress
                 var phasesEl = el.querySelector('.sync-phases');
@@ -275,12 +361,102 @@
                         var p = d.phases[i];
                         var phaseId = 'phase-' + p.name;
                         var phaseEl = phasesEl.querySelector('[id="' + phaseId + '"]');
-                        var phaseHTML = renderSyncPhase(p, { id: phaseId, showRunBtn: false });
 
-                        if (phaseEl) {
-                            phaseEl.outerHTML = phaseHTML;
-                        } else {
+                        if (!phaseEl) {
+                            // New phase: create the full element
+                            var phaseHTML = renderSyncPhase(p, { id: phaseId, showRunBtn: false });
                             phasesEl.insertAdjacentHTML('beforeend', phaseHTML);
+                        } else {
+                            // Existing phase: surgical update only (never touch progress-track to avoid restarting throbber)
+                            phaseEl.className = 'sync-phase ' + p.status;
+
+                            // Update phase-main (icon, label, message, count)
+                            var mainEl = phaseEl.querySelector('.phase-main');
+                            if (mainEl) {
+                                var icon = '&#9675;';
+                                if (p.status === 'complete') icon = '&#10003;';
+                                else if (p.status === 'failed') icon = '&#10007;';
+                                else if (p.status === 'running') icon = '&#9679;';
+                                else if (p.status === 'skipped') icon = '&#8212;';
+
+                                var iconEl = mainEl.querySelector('.phase-icon');
+                                if (iconEl) iconEl.innerHTML = icon;
+
+                                var labelEl = mainEl.querySelector('.phase-label');
+                                if (labelEl) labelEl.textContent = p.label || '';
+
+                                var detailEl = mainEl.querySelector('.phase-detail');
+                                if (p.message) {
+                                    if (!detailEl) {
+                                        var newDetailEl = document.createElement('span');
+                                        newDetailEl.className = 'phase-detail' + (p.status === 'failed' ? ' error' : '');
+                                        newDetailEl.textContent = p.message;
+                                        mainEl.appendChild(newDetailEl);
+                                    } else {
+                                        detailEl.textContent = p.message;
+                                        detailEl.className = 'phase-detail' + (p.status === 'failed' ? ' error' : '');
+                                    }
+                                } else if (detailEl) {
+                                    detailEl.remove();
+                                }
+
+                                // For multi-destination phases, sub-phase rows already show progress.
+                                // Keep top count hidden there to avoid jumping between destinations.
+                                var countEl = mainEl.querySelector('.phase-count');
+                                var hasMultipleDestinations = p.sub_phases && p.sub_phases.length > 1;
+                                if (!hasMultipleDestinations && (p.total || 0) > 0) {
+                                    var countText = (p.current || 0) + ' / ' + p.total;
+                                    if (!countEl) {
+                                        countEl = document.createElement('span');
+                                        countEl.className = 'phase-count';
+                                        mainEl.appendChild(countEl);
+                                    }
+                                    countEl.textContent = countText;
+                                } else if (countEl) {
+                                    countEl.remove();
+                                }
+                            }
+
+                            // Update sub-phases if present
+                            if (p.sub_phases && p.sub_phases.length > 0) {
+                                var subPhasesEl = phaseEl.querySelector('.sync-sub-phases');
+                                if (!subPhasesEl) {
+                                    subPhasesEl = document.createElement('div');
+                                    subPhasesEl.className = 'sync-sub-phases';
+                                    phaseEl.appendChild(subPhasesEl);
+                                    
+                                    // First time sub_phases appear: update progress-track to use throbber
+                                    if (p.status === 'running' && p.sub_phases.length > 1) {
+                                        var progressTrack = phaseEl.querySelector('.phase-progress-track');
+                                        if (progressTrack && !progressTrack.classList.contains('indeterminate')) {
+                                            progressTrack.classList.add('indeterminate');
+                                            progressTrack.style.width = '';
+                                            var fill = progressTrack.querySelector('.phase-progress-fill');
+                                            if (fill) fill.style.width = '';
+                                        }
+                                    }
+                                }
+
+                                // Rebuild sub-phases (simpler since they change more frequently)
+                                subPhasesEl.innerHTML = '';
+                                for (var si = 0; si < p.sub_phases.length; si++) {
+                                    var sp = p.sub_phases[si];
+                                    var spIcon = sp.status === 'complete' ? '&#10003;' : sp.status === 'failed' ? '&#10007;' : sp.status === 'running' ? '&#9679;' : '&#9675;';
+                                    var spHTML = '<div class="sync-sub-phase ' + (sp.status || 'pending') + '">' +
+                                        '<span class="sub-phase-icon">' + spIcon + '</span>' +
+                                        '<span class="sub-phase-label">' + (sp.label || '') + '</span>';
+                                    if (sp.message) spHTML += '<span class="sub-phase-detail">' + sp.message + '</span>';
+                                    if ((sp.total || 0) > 0 && !msgHasRatio(sp.message, sp.current || 0, sp.total)) {
+                                        spHTML += '<span class="sub-phase-count">' + (sp.current || 0) + ' / ' + sp.total + '</span>';
+                                    }
+                                    spHTML += '</div>';
+                                    subPhasesEl.insertAdjacentHTML('beforeend', spHTML);
+                                }
+                            } else {
+                                var subPhasesEl = phaseEl.querySelector('.sync-sub-phases');
+                                if (subPhasesEl) subPhasesEl.remove();
+                            }
+                            // NOTE: Never touch progress-track — leave throbber/bar animation stable
                         }
                     }
                 }

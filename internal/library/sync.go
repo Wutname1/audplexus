@@ -191,6 +191,12 @@ type SyncService struct {
 	subMu       sync.Mutex
 	subscribers map[int]chan SyncEvent
 	nextSubID   int
+
+	// Event throttling: batch rapid updates into a single event per ~50ms window.
+	// This prevents the UI from jumping when multiple phases update concurrently.
+	emitMu      sync.Mutex
+	emitTimer   *time.Timer
+	emitPending bool
 }
 
 // NewSyncService creates a new library sync service.
@@ -280,11 +286,46 @@ func (s *SyncService) Unsubscribe(id int) {
 // emit sends the current progress snapshot to all subscribers.
 // Must be called while s.mu is held (read or write).
 func (s *SyncService) emitLocked() {
+	s.throttledEmitLocked()
+}
+
+// throttledEmitLocked schedules an emit with debouncing. Multiple calls within a
+// ~50ms window are coalesced into a single event. This prevents UI jitter when
+// multiple concurrent phases (Audiobooks, Jellyfin, Nicflix) update rapidly.
+func (s *SyncService) throttledEmitLocked() {
+	s.emitMu.Lock()
+	defer s.emitMu.Unlock()
+
+	// If a timer is already pending, nothing to do — the next event will have
+	// the latest state.
+	if s.emitPending {
+		return
+	}
+
+	// Mark as pending and schedule the actual emit for 50ms from now.
+	// This coalesces rapid concurrent updates into a single snapshot.
+	s.emitPending = true
+	s.emitTimer = time.AfterFunc(50*time.Millisecond, func() {
+		s.mu.RLock()
+		defer s.mu.RUnlock()
+		s.doEmitLocked()
+	})
+}
+
+// doEmitLocked does the actual broadcast without throttling, assuming s.mu is held.
+func (s *SyncService) doEmitLocked() {
+	s.emitMu.Lock()
+	s.emitPending = false
+	s.emitTimer = nil
+	s.emitMu.Unlock()
+
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
+
 	if len(s.subscribers) == 0 {
 		return
 	}
+
 	evt := SyncEvent{
 		Running:      s.progress.Running,
 		Mode:         s.progress.Mode,

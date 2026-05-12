@@ -762,6 +762,13 @@ h2 { margin: 1.5rem 0 0.75rem; font-size: 1.2rem; color: var(--text-muted); }
     flex-shrink: 0;
     opacity: 0.8;
 }
+.sub-phase-count {
+    color: var(--text-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+    font-size: 0.75rem;
+    opacity: 0.7;
+}
 
 .sync-sub-phase.complete .sub-phase-detail,
 .sync-sub-phase.failed .sub-phase-detail {
