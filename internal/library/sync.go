@@ -929,9 +929,7 @@ func (s *SyncService) doAudibleSync(ctx context.Context, syncRecord *database.Sy
 					break
 				}
 			}
-			if scanned%10 == 0 {
-				s.emitLocked()
-			}
+			s.emitLocked()
 			s.mu.Unlock()
 			continue
 		}
@@ -950,9 +948,7 @@ func (s *SyncService) doAudibleSync(ctx context.Context, syncRecord *database.Sy
 					break
 				}
 			}
-			if scanned%10 == 0 {
-				s.emitLocked()
-			}
+			s.emitLocked()
 			s.mu.Unlock()
 			continue
 		}
@@ -976,9 +972,7 @@ func (s *SyncService) doAudibleSync(ctx context.Context, syncRecord *database.Sy
 						break
 					}
 				}
-				if scanned%10 == 0 {
-					s.emitLocked()
-				}
+				s.emitLocked()
 				s.mu.Unlock()
 				continue
 			}
@@ -1010,9 +1004,7 @@ func (s *SyncService) doAudibleSync(ctx context.Context, syncRecord *database.Sy
 					break
 				}
 			}
-			if scanned%10 == 0 {
-				s.emitLocked()
-			}
+			s.emitLocked()
 			s.mu.Unlock()
 			if scanned%20 == 0 {
 				syncRecord.BooksAdded = added
@@ -1031,9 +1023,7 @@ func (s *SyncService) doAudibleSync(ctx context.Context, syncRecord *database.Sy
 				break
 			}
 		}
-		if scanned%10 == 0 {
-			s.emitLocked()
-		}
+		s.emitLocked()
 		s.mu.Unlock()
 		if scanned%20 == 0 {
 			syncRecord.BooksAdded = added
