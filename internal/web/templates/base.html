@@ -193,6 +193,20 @@
                 html += '<div class="phase-progress-track"><div class="phase-progress-fill" style="width:' + pct + '%"></div></div>';
             }
 
+            if (p.sub_phases && p.sub_phases.length > 0) {
+                html += '<div class="sync-sub-phases">';
+                for (var si = 0; si < p.sub_phases.length; si++) {
+                    var sp = p.sub_phases[si];
+                    var spIcon = sp.status === 'complete' ? '&#10003;' : sp.status === 'failed' ? '&#10007;' : sp.status === 'running' ? '&#9679;' : '&#9675;';
+                    html += '<div class="sync-sub-phase ' + (sp.status || 'pending') + '">';
+                    html += '<span class="sub-phase-icon">' + spIcon + '</span>';
+                    html += '<span class="sub-phase-label">' + (sp.label || '') + '</span>';
+                    if (sp.message) html += '<span class="sub-phase-detail">' + sp.message + '</span>';
+                    html += '</div>';
+                }
+                html += '</div>';
+            }
+
             html += '</div>';
             return html;
         }

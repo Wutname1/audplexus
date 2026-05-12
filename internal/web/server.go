@@ -111,10 +111,10 @@ func NewServer(
 	// only running against the active MEDIA_SERVER backend. Falls back to
 	// the legacy single-backend path when no destinations are wired
 	// (early boot before first-boot synthesis).
-	syncSvc.SetPlexSyncCallback(func(ctx context.Context) (int, error) {
-		// Modern path: fan out to enabled destinations.
+	syncSvc.SetPlexSyncCallback(func(ctx context.Context, subFn library.SubPhaseFn) (int, error) {
+		// Modern path: fan out to enabled destinations with per-destination progress.
 		if dm := dlMgr.Destinations(); dm != nil {
-			total, results := dm.TriggerScanAll(ctx)
+			total, results := dm.TriggerScanAllWithFn(ctx, subFn)
 			if len(results) > 0 {
 				for _, r := range results {
 					errMsg := ""
@@ -140,9 +140,9 @@ func NewServer(
 		}
 		return backend.TriggerLibraryScan(ctx)
 	})
-	syncSvc.SetPlexReconcileCallback(func(ctx context.Context, progressFn func(current, total int)) error {
+	syncSvc.SetPlexReconcileCallback(func(ctx context.Context, subFn library.SubPhaseFn, progressFn func(current, total int)) error {
 		if dm := dlMgr.Destinations(); dm != nil {
-			results := dm.ReconcileAll(ctx, progressFn)
+			results := dm.ReconcileAllWithFn(ctx, subFn, progressFn)
 			if len(results) > 0 {
 				okN, failN := 0, 0
 				for _, r := range results {

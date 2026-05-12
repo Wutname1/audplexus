@@ -70,21 +70,34 @@ func phaseLabel(phase SyncPhase) string {
 	return string(phase)
 }
 
+// SubPhaseStatus tracks progress for one destination within a parent phase.
+type SubPhaseStatus struct {
+	ID            string  `json:"id"`
+	Label         string  `json:"label"`
+	Status        string  `json:"status"` // "pending", "running", "complete", "failed"
+	Message       string  `json:"message,omitempty"`
+	Current       int     `json:"current,omitempty"`
+	Total         int     `json:"total,omitempty"`
+	Percent       float64 `json:"percent,omitempty"`
+	Indeterminate bool    `json:"indeterminate,omitempty"`
+}
+
 // PhaseStatus tracks the state of a single sync phase.
 type PhaseStatus struct {
-	Name           SyncPhase `json:"name"`
-	Label          string    `json:"label"`
-	Status         string    `json:"status"` // "pending", "running", "complete", "failed", "skipped"
-	Message        string    `json:"message,omitempty"`
-	Error          string    `json:"error,omitempty"`
-	Current        int       `json:"current,omitempty"`
-	Total          int       `json:"total,omitempty"`
-	DisplayCurrent int       `json:"display_current,omitempty"`
-	DisplayTotal   int       `json:"display_total,omitempty"`
-	Percent        float64   `json:"percent,omitempty"`
-	Indeterminate  bool      `json:"indeterminate,omitempty"`
-	StartedAt      time.Time `json:"started_at,omitempty"`
-	EndedAt        time.Time `json:"ended_at,omitempty"`
+	Name           SyncPhase       `json:"name"`
+	Label          string          `json:"label"`
+	Status         string          `json:"status"` // "pending", "running", "complete", "failed", "skipped"
+	Message        string          `json:"message,omitempty"`
+	Error          string          `json:"error,omitempty"`
+	Current        int             `json:"current,omitempty"`
+	Total          int             `json:"total,omitempty"`
+	DisplayCurrent int             `json:"display_current,omitempty"`
+	DisplayTotal   int             `json:"display_total,omitempty"`
+	Percent        float64         `json:"percent,omitempty"`
+	Indeterminate  bool            `json:"indeterminate,omitempty"`
+	StartedAt      time.Time       `json:"started_at,omitempty"`
+	EndedAt        time.Time       `json:"ended_at,omitempty"`
+	SubPhases      []SubPhaseStatus `json:"sub_phases,omitempty"`
 }
 
 // SyncProgress tracks the current state of a library sync.
@@ -126,10 +139,15 @@ func (p SyncProgress) Percent() float64 {
 	return percent
 }
 
+// SubPhaseFn is called by destination fan-out callbacks to report per-destination state changes.
+// id and label identify the destination; status is one of "running", "complete", "failed".
+// current/total are optional progress counters (0 means indeterminate).
+type SubPhaseFn func(id, label, status, message string, current, total int)
+
 // PlexSyncFunc is a callback that the SyncService uses to perform a combined Plex scan + query.
 // This avoids importing web-layer Plex code into the library package.
-type PlexSyncFunc func(ctx context.Context) (plexItemCount int, err error)
-type PlexReconcileFunc func(ctx context.Context, progressFn func(current, total int)) error
+type PlexSyncFunc func(ctx context.Context, subFn SubPhaseFn) (plexItemCount int, err error)
+type PlexReconcileFunc func(ctx context.Context, subFn SubPhaseFn, progressFn func(current, total int)) error
 
 // SyncEvent is emitted via SSE whenever sync progress changes.
 type SyncEvent struct {
@@ -160,6 +178,9 @@ type SyncService struct {
 	plexSyncFunc      PlexSyncFunc
 	plexReconcileFunc PlexReconcileFunc
 
+	// subPhaseFnFor returns a SubPhaseFn that writes into the named phase's SubPhases slice.
+	// Created lazily — accessing via method keeps the closure clean.
+
 	mu       sync.RWMutex
 	progress SyncProgress
 
@@ -179,6 +200,49 @@ func NewSyncService(db database.Database, client *audible.Client, libraryDir str
 		client:      client,
 		libraryDir:  libraryDir,
 		subscribers: make(map[int]chan SyncEvent),
+	}
+}
+
+// subPhaseFnFor returns a SubPhaseFn closure that upserts a named SubPhaseStatus into the named
+// phase and emits a progress event. Safe to call concurrently from multiple goroutines.
+func (s *SyncService) subPhaseFnFor(phase SyncPhase) SubPhaseFn {
+	return func(id, label, status, message string, current, total int) {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		for i := range s.progress.Phases {
+			if s.progress.Phases[i].Name == phase {
+				sub := &s.progress.Phases[i].SubPhases
+				for j := range *sub {
+					if (*sub)[j].ID == id {
+						(*sub)[j].Label = label
+						(*sub)[j].Status = status
+						(*sub)[j].Message = message
+						(*sub)[j].Current = current
+						(*sub)[j].Total = total
+						if total > 0 {
+							(*sub)[j].Percent = float64(current) / float64(total)
+						} else {
+							(*sub)[j].Percent = 0
+						}
+						(*sub)[j].Indeterminate = total == 0 && status == "running"
+						s.emitLocked()
+						return
+					}
+				}
+				// Not found — append new entry.
+				*sub = append(*sub, SubPhaseStatus{
+					ID:            id,
+					Label:         label,
+					Status:        status,
+					Message:       message,
+					Current:       current,
+					Total:         total,
+					Indeterminate: total == 0 && status == "running",
+				})
+				s.emitLocked()
+				return
+			}
+		}
 	}
 }
 
@@ -356,7 +420,7 @@ func (s *SyncService) RunPhase(ctx context.Context, phase SyncPhase) error {
 		if s.plexSyncFunc == nil {
 			phaseErr = fmt.Errorf("media server not configured")
 		} else {
-			items, err := s.plexSyncFunc(ctx)
+			items, err := s.plexSyncFunc(ctx, s.subPhaseFnFor(PhasePlexSync))
 			if err != nil {
 				phaseErr = err
 			} else {
@@ -375,7 +439,7 @@ func (s *SyncService) RunPhase(ctx context.Context, phase SyncPhase) error {
 		} else {
 			completeStatus := database.BookStatusComplete
 			_, completeCount, _ := s.db.ListBooks(ctx, database.BookFilter{Status: &completeStatus, Limit: 1})
-			err := s.plexReconcileFunc(ctx, func(current, total int) {
+			err := s.plexReconcileFunc(ctx, s.subPhaseFnFor(PhaseCollectionSync), func(current, total int) {
 				displayCurrent := scaleProgress(current, total, completeCount)
 				s.updatePhaseProgressWithDisplay(PhaseCollectionSync, current, total, false, displayCurrent, completeCount)
 			})
@@ -495,7 +559,7 @@ func (s *SyncService) runSync(ctx context.Context, mode SyncMode) (int, error) {
 	plexItems := 0
 	if mode == SyncModeFull && s.plexSyncFunc != nil {
 		s.setPhase(PhasePlexSync, "running", "Syncing with library destination (scan + query)...")
-		items, plexErr := s.plexSyncFunc(ctx)
+		items, plexErr := s.plexSyncFunc(ctx, s.subPhaseFnFor(PhasePlexSync))
 		if plexErr != nil {
 			s.setPhase(PhasePlexSync, "failed", plexErr.Error())
 			syncLog.Warn().Err(plexErr).Msg("library scan phase failed")
@@ -518,7 +582,7 @@ func (s *SyncService) runSync(ctx context.Context, mode SyncMode) (int, error) {
 		s.setPhase(PhaseCollectionSync, "running", "Reconciling Plex collections...")
 		completeStatus := database.BookStatusComplete
 		_, completeCount, _ := s.db.ListBooks(ctx, database.BookFilter{Status: &completeStatus, Limit: 1})
-		reconcileErr := s.plexReconcileFunc(ctx, func(current, total int) {
+		reconcileErr := s.plexReconcileFunc(ctx, s.subPhaseFnFor(PhaseCollectionSync), func(current, total int) {
 			displayCurrent := scaleProgress(current, total, completeCount)
 			s.updatePhaseProgressWithDisplay(PhaseCollectionSync, current, total, false, displayCurrent, completeCount)
 		})
@@ -625,6 +689,7 @@ func (s *SyncService) setPhase(phase SyncPhase, status, message string) {
 				s.progress.Phases[i].StartedAt = now
 				s.progress.Phases[i].EndedAt = time.Time{}
 				s.progress.Phases[i].Error = ""
+				s.progress.Phases[i].SubPhases = nil // reset sub-phases on each run
 				if phase == PhasePlexSync {
 					setPhaseProgress(&s.progress.Phases[i], 0, 0, true, status)
 				}

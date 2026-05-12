@@ -234,6 +234,115 @@ type DestinationReconcileResult struct {
 	Err         error
 }
 
+// TriggerScanAllWithFn is like TriggerScanAll but calls subFn with per-destination state changes.
+func (m *DestinationManager) TriggerScanAllWithFn(ctx context.Context, subFn SubPhaseFn) (int, []DestinationScanResult) {
+	dests := m.ListEnabled(ctx)
+	if len(dests) == 0 {
+		return 0, nil
+	}
+	return fanOutScanWithFn(ctx, dests, m.maxConcurrency, subFn)
+}
+
+// ReconcileAllWithFn is like ReconcileAll but calls subFn with per-destination state changes.
+func (m *DestinationManager) ReconcileAllWithFn(ctx context.Context, subFn SubPhaseFn, progressFn func(current, total int)) []DestinationReconcileResult {
+	dests := m.ListEnabled(ctx)
+	if len(dests) == 0 {
+		return nil
+	}
+	return fanOutReconcileWithFn(ctx, dests, m.maxConcurrency, subFn, progressFn)
+}
+
+// fanOutScanWithFn is the inner fan-out for TriggerScanAllWithFn, split out so
+// the test package can drive it with pre-built stub backends.
+func fanOutScanWithFn(ctx context.Context, dests []DestinationBackend, maxConcurrency int, subFn SubPhaseFn) (int, []DestinationScanResult) {
+	for _, d := range dests {
+		subFn(d.Row.ID, d.Row.DisplayName, "pending", "", 0, 0)
+	}
+
+	sem := semaphore.NewWeighted(int64(maxConcurrency))
+	results := make([]DestinationScanResult, len(dests))
+	var wg sync.WaitGroup
+
+	for i, db := range dests {
+		i, db := i, db
+		if err := sem.Acquire(ctx, 1); err != nil {
+			results[i] = DestinationScanResult{Destination: db.Row, Err: err}
+			subFn(db.Row.ID, db.Row.DisplayName, "failed", err.Error(), 0, 0)
+			continue
+		}
+		subFn(db.Row.ID, db.Row.DisplayName, "running", "", 0, 0)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer sem.Release(1)
+			perCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+			defer cancel()
+			items, err := db.Backend.TriggerLibraryScan(perCtx)
+			results[i] = DestinationScanResult{Destination: db.Row, Items: items, Err: err}
+			if err != nil {
+				subFn(db.Row.ID, db.Row.DisplayName, "failed", err.Error(), 0, 0)
+				dlLog.Warn().Err(err).Str("destination_id", db.Row.ID).Str("destination_name", db.Row.DisplayName).Msg("destinations: library scan failed")
+			} else {
+				subFn(db.Row.ID, db.Row.DisplayName, "complete", fmt.Sprintf("%d items", items), items, items)
+			}
+		}()
+	}
+	wg.Wait()
+
+	maxItems := 0
+	for _, r := range results {
+		if r.Err == nil && r.Items > maxItems {
+			maxItems = r.Items
+		}
+	}
+	return maxItems, results
+}
+
+// fanOutReconcileWithFn is the inner fan-out for ReconcileAllWithFn.
+func fanOutReconcileWithFn(ctx context.Context, dests []DestinationBackend, maxConcurrency int, subFn SubPhaseFn, progressFn func(current, total int)) []DestinationReconcileResult {
+	for _, d := range dests {
+		subFn(d.Row.ID, d.Row.DisplayName, "pending", "", 0, 0)
+	}
+
+	sem := semaphore.NewWeighted(int64(maxConcurrency))
+	results := make([]DestinationReconcileResult, len(dests))
+	var wg sync.WaitGroup
+
+	for i, db := range dests {
+		i, db := i, db
+		if err := sem.Acquire(ctx, 1); err != nil {
+			results[i] = DestinationReconcileResult{Destination: db.Row, Err: err}
+			subFn(db.Row.ID, db.Row.DisplayName, "failed", err.Error(), 0, 0)
+			continue
+		}
+		subFn(db.Row.ID, db.Row.DisplayName, "running", "", 0, 0)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			defer sem.Release(1)
+			perCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			defer cancel()
+			err := db.Backend.ReconcileLibrary(perCtx, func(current, total int) {
+				if progressFn != nil {
+					progressFn(current, total)
+				}
+				if total > 0 {
+					subFn(db.Row.ID, db.Row.DisplayName, "running", fmt.Sprintf("%d / %d", current, total), current, total)
+				}
+			})
+			results[i] = DestinationReconcileResult{Destination: db.Row, Err: err}
+			if err != nil {
+				subFn(db.Row.ID, db.Row.DisplayName, "failed", err.Error(), 0, 0)
+				dlLog.Warn().Err(err).Str("destination_id", db.Row.ID).Str("destination_name", db.Row.DisplayName).Msg("destinations: reconcile failed")
+			} else {
+				subFn(db.Row.ID, db.Row.DisplayName, "complete", "", 0, 0)
+			}
+		}()
+	}
+	wg.Wait()
+	return results
+}
+
 // recordOutcomes upserts the book_library_destinations row for this
 // (book, destination) with summary state derived from the outcomes.
 func (m *DestinationManager) recordOutcomes(ctx context.Context, bookID int64, dest *database.LibraryDestination, outcomes []mediaserver.Outcome) {

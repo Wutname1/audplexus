@@ -45,6 +45,17 @@
 			{{else}}
 			<div class="phase-progress-track"><div class="phase-progress-fill" style="width:{{printf "%.0f" (mul .Percent 100)}}%"></div></div>
 			{{end}}
+			{{if .SubPhases}}
+			<div class="sync-sub-phases">
+				{{range .SubPhases}}
+				<div class="sync-sub-phase {{.Status}}">
+					<span class="sub-phase-icon">{{if eq .Status "complete"}}&#10003;{{else if eq .Status "failed"}}&#10007;{{else if eq .Status "running"}}&#9679;{{else}}&#9675;{{end}}</span>
+					<span class="sub-phase-label">{{.Label}}</span>
+					{{if .Message}}<span class="sub-phase-detail">{{.Message}}</span>{{end}}
+				</div>
+				{{end}}
+			</div>
+			{{end}}
 		</div>
 		{{end}}
 	</div>
