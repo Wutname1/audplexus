@@ -837,6 +837,17 @@ h2 { margin: 1.5rem 0 0.75rem; font-size: 1.2rem; color: var(--text-muted); }
     max-width: 760px;
 }
 
+.settings-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 1.25rem 2rem;
+    margin-bottom: 1.5rem;
+}
+
+.settings-form-grid .form-group {
+    margin-bottom: 0;
+}
+
 .settings-form details > summary {
     cursor: pointer;
     font-weight: 600;

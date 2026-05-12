@@ -195,6 +195,7 @@
     <div class="settings-section">
         <h2>Configuration</h2>
         <form hx-post="/api/settings" hx-target="#save-status" hx-swap="innerHTML" class="settings-form">
+            <div class="settings-form-grid">
             <div class="form-group">
                 <label for="sync_schedule">Sync Schedule (cron)</label>
                 <input type="text" id="sync_schedule" name="sync_schedule" value="{{.SyncSchedule}}" placeholder="0 */6 * * *">
@@ -298,6 +299,8 @@
                 <label for="process_concurrency">Process Workers</label>
                 <input type="number" id="process_concurrency" name="process_concurrency" value="{{.ProcessConcurrency}}" min="0" max="16">
                 <small>0 = auto. Controls metadata/organize stage parallelism.</small>
+            </div>
+
             </div>
 
             <p class="muted">Note: sync schedule/mode, auto-queue-new, and worker concurrency changes are applied on next restart.</p>
