@@ -871,33 +871,7 @@ func (s *SyncService) doAudibleSync(ctx context.Context, syncRecord *database.Sy
 			continue
 		}
 
-		// Additional runtime check: ensure entitlement resolves before adding.
-		canDownload, err := s.client.CanDownload(ctx, item)
-		if err != nil || !canDownload {
-			logMsg := "skipping item after entitlement check"
-			if err != nil {
-				logMsg = fmt.Sprintf("skipping item after entitlement check: %v", err)
-			}
-			syncLog.Info().Str("asin", book.ASIN).Str("title", book.Title).Msg(logMsg)
-			scanned++
-			s.mu.Lock()
-			s.progress.BooksScanned = scanned
-			s.progress.BooksAdded = added
-			for i := range s.progress.Phases {
-				if s.progress.Phases[i].Name == PhaseAudibleSync {
-					setPhaseProgress(&s.progress.Phases[i], scanned, len(books), false, s.progress.Phases[i].Status)
-					break
-				}
-			}
-			if scanned%10 == 0 {
-				s.emitLocked()
-			}
-			s.mu.Unlock()
-			continue
-		}
-
-		keepASIN[book.ASIN] = struct{}{}
-
+		// Check DB first — known books skip the entitlement network call entirely.
 		existing, err := s.db.GetBookByASIN(ctx, book.ASIN)
 		if err != nil {
 			syncLog.Error().Err(err).Str("asin", book.ASIN).Msg("failed to check existing book")
@@ -917,6 +891,35 @@ func (s *SyncService) doAudibleSync(ctx context.Context, syncRecord *database.Sy
 			s.mu.Unlock()
 			continue
 		}
+
+		// For brand-new books only: verify entitlement before adding to the DB.
+		if existing == nil {
+			canDownload, cdErr := s.client.CanDownload(ctx, item)
+			if cdErr != nil || !canDownload {
+				logMsg := "skipping new item after entitlement check"
+				if cdErr != nil {
+					logMsg = fmt.Sprintf("skipping new item after entitlement check: %v", cdErr)
+				}
+				syncLog.Info().Str("asin", book.ASIN).Str("title", book.Title).Msg(logMsg)
+				scanned++
+				s.mu.Lock()
+				s.progress.BooksScanned = scanned
+				s.progress.BooksAdded = added
+				for i := range s.progress.Phases {
+					if s.progress.Phases[i].Name == PhaseAudibleSync {
+						setPhaseProgress(&s.progress.Phases[i], scanned, len(books), false, s.progress.Phases[i].Status)
+						break
+					}
+				}
+				if scanned%10 == 0 {
+					s.emitLocked()
+				}
+				s.mu.Unlock()
+				continue
+			}
+		}
+
+		keepASIN[book.ASIN] = struct{}{}
 
 		// Preserve status/file info for existing books
 		if existing != nil {
